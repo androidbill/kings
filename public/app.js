@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
-  getDatabase, ref, set, get, update, onValue, runTransaction, onDisconnect,
+  getDatabase, ref, set, get, update, onValue, runTransaction, onDisconnect, serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 import { firebaseConfig } from './firebase-config.js';
 import { WORD_CODES } from './wordcodes.js';
@@ -13,6 +13,33 @@ import { pickBotMove } from './bot.js';
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
+
+// Firebase RTDB silently PRUNES any path that resolves to null, {}, or [] — so
+// game.revealed:{}, game.holding:null, game.lastTurnRemaining:[] never survive a
+// round-trip and come back as `undefined`, which crashes rules.js (`game.revealed[pid]`
+// throws on undefined). Every read of a game object coming from Firebase must be
+// normalized back to the shape rules.js expects before use.
+function normalizeGame(game) {
+  if (!game) return game;
+  return {
+    ...game,
+    revealed: game.revealed || {},
+    holding: game.holding || null,
+    lastTurnRemaining: game.lastTurnRemaining || [],
+    caller: game.caller || null,
+    lastRoundScores: game.lastRoundScores || null,
+    // Drawing the last burn card (a completely normal move) empties this to [], and a
+    // reshuffle-starved deck can do the same to drawPile — both get pruned by Firebase.
+    burnPile: game.burnPile || [],
+    drawPile: game.drawPile || [],
+  };
+}
+
+// RTDB gives a live client/server clock offset for free — used so the turn timer
+// counts down from the SAME instant on every device, immune to a phone's clock drift.
+let serverTimeOffset = 0;
+onValue(ref(db, '.info/serverTimeOffset'), (snap) => { serverTimeOffset = snap.val() || 0; });
+function serverNow() { return Date.now() + serverTimeOffset; }
 
 // ---------------------------------------------------------------- identity
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
@@ -211,6 +238,8 @@ let currentRoomCode = null;
 let roomUnsub = null;
 let latestRoom = null;
 let isHost = false;
+let turnTimerInterval = null;
+let autoPlayBusy = false; // prevents overlapping timeout-fallback transactions while one is in flight
 let soloMode = null; // { botCount, difficulties: [] } when playing solo
 let selectedCardBack = localStorage.getItem('kings_cardback') || 'classic';
 
@@ -232,7 +261,7 @@ async function createRoom(name) {
     createdAt: Date.now(),
     hostId: playerId,
     status: 'lobby',
-    settings: { deckCount: 1, layout: 'rows4', cardBack: selectedCardBack },
+    settings: { deckCount: 1, layout: 'rows4', cardBack: selectedCardBack, turnSeconds: 30 },
     players: { [playerId]: { name: myName, joinedAt: Date.now() } },
     order: [playerId],
   };
@@ -262,11 +291,15 @@ function enterRoom(code, hosting) {
   suppressTurnSound = true;
   lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null;
   localStorage.setItem('kings_room', code);
+  update(roomRef(code, 'players', playerId), { left: false }).catch(() => {});
   onDisconnect(roomRef(code, 'players', playerId, 'left')).set(true);
   if (roomUnsub) roomUnsub();
+  clearInterval(turnTimerInterval);
+  turnTimerInterval = setInterval(tickTurnTimer, 1000);
   roomUnsub = onValue(roomRef(code), (snap) => {
     latestRoom = snap.val();
     if (!latestRoom) { toast('Room closed'); leaveRoom(); showScreen('screen-home'); return; }
+    if (latestRoom.game) latestRoom.game = normalizeGame(latestRoom.game);
     isHost = latestRoom.hostId === playerId;
     renderRoom();
   });
@@ -274,6 +307,8 @@ function enterRoom(code, hosting) {
 
 function leaveRoom() {
   if (roomUnsub) { roomUnsub(); roomUnsub = null; }
+  clearInterval(turnTimerInterval);
+  hide($('turn-timer'));
   currentRoomCode = null;
   latestRoom = null;
   soloMode = null;
@@ -319,11 +354,13 @@ function renderLobby() {
 
   $('set-deck-count').value = String(room.settings.deckCount);
   $('set-layout').value = room.settings.layout;
+  $('set-turn-seconds').value = String(room.settings.turnSeconds || 30);
   renderCardBackPicker($('lobby-cardback-picker'), room.settings.cardBack, isHost, (id) => {
     update(roomRef(currentRoomCode, 'settings'), { cardBack: id });
   });
   $('set-deck-count').disabled = !isHost;
   $('set-layout').disabled = !isHost;
+  $('set-turn-seconds').disabled = !isHost;
 
   const activeCount = order.filter((pid) => room.players?.[pid] && !room.players[pid].left).length;
   if (isHost) {
@@ -356,6 +393,9 @@ $('set-deck-count').addEventListener('change', (e) => {
 $('set-layout').addEventListener('change', (e) => {
   if (isHost) update(roomRef(currentRoomCode, 'settings'), { layout: e.target.value });
 });
+$('set-turn-seconds').addEventListener('change', (e) => {
+  if (isHost) update(roomRef(currentRoomCode, 'settings'), { turnSeconds: parseInt(e.target.value, 10) });
+});
 
 $('lobby-start').addEventListener('click', async () => {
   const room = latestRoom;
@@ -366,20 +406,65 @@ $('lobby-start').addEventListener('click', async () => {
     return;
   }
   const game = newGame({ playerIds: order, deckCount: room.settings.deckCount, layout: room.settings.layout, seed: Date.now() % 2147483647 });
-  await update(roomRef(currentRoomCode), { status: 'active', order, game });
+  await update(roomRef(currentRoomCode), { status: 'active', order, game, turnStartedAt: serverTimestamp() });
 });
 
 // ---------------------------------------------------------------- moves (online)
-async function sendMove(move) {
+// actingPid defaults to the local player, but the turn-timeout fallback below also
+// calls this on behalf of another (unresponsive) player, since there's no server
+// function to do it authoritatively on the Spark plan.
+async function sendMove(move, actingPid = playerId) {
   if (soloMode) { applySoloMove(move); return; }
   const gref = roomRef(currentRoomCode, 'game');
   let result;
+  let turnEnded = false;
   await runTransaction(gref, (game) => {
     if (!game) return game;
-    try { result = applyMove(game, playerId, move); return result; }
-    catch (err) { result = { error: err.message }; return game; }
+    try {
+      result = applyMove(normalizeGame(game), actingPid, move);
+      turnEnded = currentPlayer(result) !== actingPid || result.phase === 'roundEnd' || result.phase === 'gameOver';
+      return result;
+    } catch (err) { result = { error: err.message }; return game; }
   });
-  if (result?.error) toast(result.error);
+  if (result?.error) { if (actingPid === playerId) toast(result.error); return; }
+  if (turnEnded) await update(roomRef(currentRoomCode), { turnStartedAt: serverTimestamp() });
+}
+
+// Bare number, tabular-nums, gold when it's yours, pulsing red under 5s — same
+// treatment as HexColony's board-timer pill.
+function tickTurnTimer() {
+  const room = latestRoom;
+  const timerEl = $('turn-timer');
+  const game = room?.game;
+  if (!room || room.status !== 'active' || !game || (game.phase !== 'play' && game.phase !== 'lastTurn')) {
+    hide(timerEl);
+    return;
+  }
+  const turnSeconds = room.settings?.turnSeconds || 30;
+  const startedAt = typeof room.turnStartedAt === 'number' ? room.turnStartedAt : null;
+  if (!startedAt) { hide(timerEl); return; }
+
+  const remainingMs = startedAt + turnSeconds * 1000 - serverNow();
+  const secs = Math.max(0, Math.ceil(remainingMs / 1000));
+  const curPid = currentPlayer(game);
+  const mine = curPid === playerId;
+
+  show(timerEl);
+  timerEl.textContent = String(secs);
+  timerEl.classList.toggle('mine', mine);
+  timerEl.classList.toggle('urgent', secs <= 5);
+
+  if (remainingMs <= 0 && !autoPlayBusy) {
+    // pickBotMove runs synchronously — if it ever throws, autoPlayBusy must still be
+    // released, or one bad game state permanently wedges the timeout fallback.
+    const actingPid = mine ? playerId : (remainingMs <= -5000 ? curPid : null);
+    if (actingPid) {
+      autoPlayBusy = true;
+      (async () => sendMove(pickBotMove(game, actingPid, 'medium', true), actingPid))()
+        .catch((err) => console.error('turn-timeout auto-play failed', err))
+        .finally(() => { autoPlayBusy = false; });
+    }
+  }
 }
 
 async function requestNextRound() {
@@ -387,8 +472,9 @@ async function requestNextRound() {
   const gref = roomRef(currentRoomCode, 'game');
   await runTransaction(gref, (game) => {
     if (!game || game.phase !== 'roundEnd') return game;
-    return startNextRound(game, { seed: Date.now() % 2147483647 });
+    return startNextRound(normalizeGame(game), { seed: Date.now() % 2147483647 });
   });
+  await update(roomRef(currentRoomCode), { turnStartedAt: serverTimestamp() });
 }
 
 // ================================================================== SOLO MODE

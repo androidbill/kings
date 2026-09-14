@@ -183,7 +183,24 @@ select {
   width: 100%; max-width: 520px; padding: 6px 10px;
 }
 .game-round-info { color: var(--muted); font-size: 0.9em; }
+
+.turn-badge {
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+}
 .game-turn-info { font-weight: 700; color: var(--gold); }
+.turn-timer {
+  font-weight: 800; font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+/* A hairline instead of a gap, so the clock reads as part of the same plate — only
+   shown once the timer actually has something to say. */
+.turn-timer:not(.hidden) { border-left: 1px solid rgba(255,255,255,0.16); padding-left: 9px; }
+.turn-timer.mine { color: var(--gold); }
+.turn-timer.urgent { color: var(--danger); animation: timer-tick 1s steps(2) infinite; }
+@keyframes timer-tick { 50% { opacity: 0.45; } }
 
 .opponents {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;

@@ -76,6 +76,12 @@
           <option value="rows4" selected>2 rows of 4</option>
         </select>
       </label>
+      <label>Turn timer
+        <select id="set-turn-seconds">
+          <option value="30">30 seconds</option>
+          <option value="45">45 seconds</option>
+        </select>
+      </label>
       <div id="lobby-cardback-picker" class="cardback-picker"></div>
     </div>
 
@@ -119,7 +125,10 @@
 <section id="screen-game" class="screen hidden">
   <div class="game-top">
     <div id="game-round-info" class="game-round-info"></div>
-    <div id="game-turn-info" class="game-turn-info"></div>
+    <div class="turn-badge">
+      <span id="game-turn-info" class="game-turn-info"></span>
+      <span id="turn-timer" class="turn-timer hidden"></span>
+    </div>
   </div>
 
   <div id="opponents" class="opponents"></div>
