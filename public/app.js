@@ -65,6 +65,7 @@ $('menu-share').addEventListener('click', async () => {
   } catch { /* cancelled */ }
 });
 $('menu-about').addEventListener('click', () => { $('about-version').textContent = `Version ${APP_VERSION}`; show($('about-modal')); });
+$('version-label').textContent = `v${APP_VERSION}`;
 $('about-close').addEventListener('click', () => hide($('about-modal')));
 
 for (const btn of document.querySelectorAll('.back-btn')) {
@@ -87,16 +88,36 @@ $('btn-install').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- version check
+// Checked on load, on every tab-foreground, and on an interval — a player can be
+// mid-game with the tab in the foreground the whole time, so visibilitychange alone
+// would never catch a deploy that happens while they're actively playing.
+let updateBannerShown = false;
 async function checkVersion() {
+  if (updateBannerShown) return;
   try {
     const res = await fetch(`version.js?t=${Date.now()}`, { cache: 'no-store' });
     const text = await res.text();
     const match = text.match(/APP_VERSION\s*=\s*'([^']+)'/);
-    if (match && match[1] !== APP_VERSION) toast('A new version is available — tap ⋮ → Refresh');
+    if (match && match[1] !== APP_VERSION) {
+      updateBannerShown = true;
+      show($('update-banner'));
+    }
   } catch { /* offline */ }
 }
 checkVersion();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
+setInterval(checkVersion, 2 * 60 * 1000);
+
+$('update-refresh').addEventListener('click', async () => {
+  $('update-refresh').textContent = 'Updating…';
+  try {
+    const regs = await navigator.serviceWorker?.getRegistrations();
+    for (const r of regs || []) await r.unregister();
+    const keys = await caches.keys();
+    for (const k of keys) await caches.delete(k);
+  } catch { /* ignore */ }
+  location.reload();
+});
 
 // ---------------------------------------------------------------- service worker
 if ('serviceWorker' in navigator) {
@@ -319,6 +340,35 @@ function scheduleBotTurn() {
 
 function renderSoloGame() {
   renderGameCommon(soloState, soloIds, 'you', { [playerId]: { name: 'You' }, ...Object.fromEntries(soloIds.slice(1).map((id, i) => [id, { name: `Bot ${i + 1} (${soloBotDifficulty[id]})` }])) }, selectedCardBack);
+  if (soloState.phase === 'gameOver') clearSoloSave();
+  else saveSoloState();
+}
+
+function saveSoloState() {
+  try {
+    localStorage.setItem('kings_solo_save', JSON.stringify({ soloState, soloIds, soloBotDifficulty, cardBack: selectedCardBack }));
+  } catch { /* storage unavailable */ }
+}
+function clearSoloSave() {
+  try { localStorage.removeItem('kings_solo_save'); } catch { /* storage unavailable */ }
+}
+function resumeSoloSave() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('kings_solo_save'));
+    if (!saved?.soloState || saved.soloState.phase === 'gameOver') return false;
+    soloState = saved.soloState;
+    soloIds = saved.soloIds;
+    soloBotDifficulty = saved.soloBotDifficulty;
+    selectedCardBack = saved.cardBack || selectedCardBack;
+    playerId = 'you';
+    myName = 'You';
+    soloMode = { botCount: soloIds.length - 1, difficulties: Object.values(soloBotDifficulty) };
+    soloPlayPhaseMoves = 0;
+    showScreen('screen-game');
+    renderSoloGame();
+    scheduleBotTurn();
+    return true;
+  } catch { return false; }
 }
 
 // ================================================================== GAME RENDERING (shared)
@@ -378,7 +428,8 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   const burnTop = game.burnPile[game.burnPile.length - 1];
   const burnPile = $('pile-burn');
   burnPile.innerHTML = burnTop ? cardFaceHtml(burnTop) : '<div class="card-back" style="visibility:hidden"></div>';
-  burnPile.classList.toggle('disabled', !(canDrawNow && game.burnPile.length > 0));
+  const canDiscardNow = isMyTurn && game.holding && game.holding.from !== 'burn';
+  burnPile.classList.toggle('disabled', !((canDrawNow && game.burnPile.length > 0) || canDiscardNow));
 
   const holdingSlot = $('holding-slot');
   if (game.holding && curPid === myId) {
@@ -393,7 +444,7 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   } else if (isMyTurn) {
     if (!game.holding) prompt = 'Draw from the deck or the burn pile';
     else if (game.holding.from === 'burn') prompt = 'Tap one of your cards to swap it in';
-    else prompt = 'Tap a card to swap, or discard';
+    else prompt = 'Tap a card to swap it in, or tap the discard pile';
   } else if (game.phase !== 'roundEnd' && game.phase !== 'gameOver') {
     prompt = `Waiting on ${esc(names[curPid]?.name || '?')}`;
   }
@@ -466,7 +517,14 @@ function cardMiniHtml(cell, cardBackId) {
 function wireGameInteractions(game, myId, isMyTurn, cols) {
   const canDraw = isMyTurn && game.revealed[myId] && !game.holding;
   $('pile-deck').onclick = () => { if (canDraw) sendMove({ type: 'draw', from: 'deck' }); };
-  $('pile-burn').onclick = () => { if (canDraw && game.burnPile.length) sendMove({ type: 'draw', from: 'burn' }); };
+  $('pile-burn').onclick = () => {
+    if (isMyTurn && game.holding) {
+      if (game.holding.from === 'burn') toast("You must swap in a card taken from the burn pile");
+      else sendMove({ type: 'discard' });
+    } else if (canDraw && game.burnPile.length) {
+      sendMove({ type: 'draw', from: 'burn' });
+    }
+  };
 
   for (const el of document.querySelectorAll('#my-grid .cell-wrap')) {
     el.onclick = () => {
@@ -560,6 +618,7 @@ $('solo-start').addEventListener('click', () => {
 
 // ---------------------------------------------------------------- boot / resume
 (function boot() {
+  if (resumeSoloSave()) return;
   const params = new URLSearchParams(location.search);
   const roomFromLink = params.get('room');
   const savedRoom = localStorage.getItem('kings_room');

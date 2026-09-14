@@ -124,6 +124,11 @@ select {
 .cardback-option.selected { border-color: var(--gold); }
 
 /* ---------------------------------------------------------------- kebab */
+.version-label {
+  position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 12px;
+  z-index: 50; color: var(--muted); font-size: 11px; opacity: 0.7;
+}
+
 .kebab-btn {
   position: fixed; top: calc(env(safe-area-inset-top) + 10px); right: 12px;
   z-index: 50; background: rgba(0,0,0,0.3); color: var(--text); border: none;
@@ -139,6 +144,20 @@ select {
   color: var(--text); text-align: left; font-size: 1em;
 }
 .kebab-menu button:hover { background: rgba(255,255,255,0.08); }
+
+.update-banner {
+  position: fixed; top: 10px; left: 12px; right: 12px; z-index: 90;
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; border-radius: 14px; font-size: 14px;
+  background: linear-gradient(100deg, var(--gold), var(--gold-dark));
+  color: #241a03; box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.update-banner span { flex: 1; font-weight: 700; }
+.update-banner button {
+  padding: 8px 14px; border: none; border-radius: 999px;
+  background: #241a03; color: #fff; font-family: inherit;
+  font-size: 13px; font-weight: 800; cursor: pointer;
+}
 
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 100;
