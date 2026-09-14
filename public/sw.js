@@ -8,12 +8,21 @@ const CORE = [
   'styles.css',
   'app.js',
   'rules.js',
+  'bot.js',
+  'cardbacks.js',
   'wordcodes.js',
   'version.js',
   'firebase-config.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
+  'audio/card-swap.mp3',
+  'audio/your-turn.mp3',
+  'audio/king-found.mp3',
+  'kingart/S.jpg',
+  'kingart/H.jpg',
+  'kingart/D.jpg',
+  'kingart/C.jpg',
 ];
 
 self.addEventListener('install', (e) => {

@@ -33,6 +33,84 @@ function showScreen(id) {
   for (const s of SCREENS) (s === id ? show : hide)($(s));
 }
 
+// ---------------------------------------------------------------- sound
+const sndSwap = new Audio('audio/card-swap.mp3');
+const sndTurn = new Audio('audio/your-turn.mp3');
+const sndKing = new Audio('audio/king-found.mp3');
+function playSound(audio) {
+  try { audio.currentTime = 0; audio.play().catch(() => {}); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------- turn-change / King fx tracking
+let wasMyTurn = false;
+let suppressTurnSound = true; // true right after entering a game so the first render never chimes
+let lastSeenRound = null;
+let lastSeenBurnTopId = null;
+let lastSeenHoldingId = null;
+
+// A drawn or newly-discarded King gets a big spinning showcase — half the screen width
+// (capped so it doesn't get absurd on a tablet), matching what was asked for.
+function showKingCelebration(card) {
+  playSound(sndKing);
+  const wrap = document.createElement('div');
+  wrap.className = 'king-celebration';
+  wrap.innerHTML = `<div class="king-card-face" style="background-image:url('${KING_ART[card.suit]}')"></div>`;
+  document.body.appendChild(wrap);
+  wrap.querySelector('.king-card-face').addEventListener('animationend', () => wrap.remove());
+}
+
+function maybeCelebrateKing(game, myId, curPid) {
+  if (game.round !== lastSeenRound) {
+    lastSeenRound = game.round;
+    lastSeenBurnTopId = null;
+    lastSeenHoldingId = null;
+  }
+  const burnTop = game.burnPile[game.burnPile.length - 1];
+  if (burnTop && burnTop.id !== lastSeenBurnTopId) {
+    lastSeenBurnTopId = burnTop.id;
+    if (burnTop.rank === 'K') showKingCelebration(burnTop);
+  }
+  if (game.holding && curPid === myId) {
+    if (game.holding.card.id !== lastSeenHoldingId) {
+      lastSeenHoldingId = game.holding.card.id;
+      if (game.holding.card.rank === 'K') showKingCelebration(game.holding.card);
+    }
+  } else {
+    lastSeenHoldingId = null;
+  }
+}
+
+// A card visually flying from one spot to another with a spin, used for swaps. Reads
+// current positions right before the move is sent — the ghost then flies to the target
+// on top of whatever the real re-render draws underneath it.
+function spawnFlyingCard(card, fromRect, toRect) {
+  const el = document.createElement('div');
+  const fromCx = fromRect.left + fromRect.width / 2;
+  const fromCy = fromRect.top + fromRect.height / 2;
+  el.style.left = `${fromCx - 30}px`;
+  el.style.top = `${fromCy - 42}px`;
+  if (card.rank === 'K') {
+    el.className = 'card-face king-face fly-card';
+    el.style.backgroundImage = `url('${KING_ART[card.suit]}')`;
+  } else {
+    const red = RED_SUITS.has(card.suit) ? ' red' : '';
+    el.className = `card-face fly-card${red}`;
+    el.innerHTML = `<span class="rank">${esc(card.rank)}</span><span class="suit">${SUIT_SYMBOL[card.suit]}</span>`;
+  }
+  document.body.appendChild(el);
+  const toCx = toRect.left + toRect.width / 2;
+  const toCy = toRect.top + toRect.height / 2;
+  const dx = toCx - fromCx;
+  const dy = toCy - fromCy;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.style.transform = `translate(${dx}px, ${dy}px) rotate(720deg)`;
+    });
+  });
+  setTimeout(() => { el.style.transition = 'opacity 0.12s'; el.style.opacity = '0'; }, 380);
+  setTimeout(() => el.remove(), 500);
+}
+
 let toastTimer = null;
 function toast(msg) {
   const t = $('toast');
@@ -43,7 +121,10 @@ function toast(msg) {
 }
 
 // ---------------------------------------------------------------- kebab / about
-$('kebab-btn').addEventListener('click', () => $('kebab-menu').classList.toggle('hidden'));
+$('kebab-btn').addEventListener('click', () => {
+  $('menu-quit').classList.toggle('hidden', $('screen-game').classList.contains('hidden'));
+  $('kebab-menu').classList.toggle('hidden');
+});
 document.addEventListener('click', (e) => {
   if (!$('kebab-menu').contains(e.target) && e.target !== $('kebab-btn')) hide($('kebab-menu'));
 });
@@ -65,6 +146,7 @@ $('menu-share').addEventListener('click', async () => {
   } catch { /* cancelled */ }
 });
 $('menu-about').addEventListener('click', () => { $('about-version').textContent = `Version ${APP_VERSION}`; show($('about-modal')); });
+$('menu-quit').addEventListener('click', () => { hide($('kebab-menu')); quitGame(); });
 $('version-label').textContent = `v${APP_VERSION}`;
 $('about-close').addEventListener('click', () => hide($('about-modal')));
 
@@ -177,6 +259,8 @@ async function joinRoom(code, name) {
 function enterRoom(code, hosting) {
   currentRoomCode = code;
   isHost = hosting;
+  suppressTurnSound = true;
+  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null;
   localStorage.setItem('kings_room', code);
   onDisconnect(roomRef(code, 'players', playerId, 'left')).set(true);
   if (roomUnsub) roomUnsub();
@@ -194,6 +278,25 @@ function leaveRoom() {
   latestRoom = null;
   soloMode = null;
   localStorage.removeItem('kings_room');
+}
+
+async function quitGame() {
+  if (soloMode) {
+    clearTimeout(botTimer);
+    clearSoloSave();
+    soloMode = null;
+    soloState = null;
+    showScreen('screen-home');
+    return;
+  }
+  if (isHost && currentRoomCode) {
+    if (!confirm('Quit this game for everyone and return to the lobby?')) return;
+    await update(roomRef(currentRoomCode), { status: 'lobby', game: null });
+  } else if (currentRoomCode) {
+    await update(roomRef(currentRoomCode, 'players', playerId), { left: true }).catch(() => {});
+  }
+  leaveRoom();
+  showScreen('screen-home');
 }
 
 function renderRoom() {
@@ -302,6 +405,8 @@ function startSolo({ botCount, difficulties, deckCount, layout }) {
   myName = 'You';
   soloMode = { botCount, difficulties };
   currentRoomCode = null;
+  suppressTurnSound = true;
+  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null;
   soloState = newGame({ playerIds: soloIds, deckCount, layout, seed: Date.now() % 2147483647 });
   soloPlayPhaseMoves = 0;
   showScreen('screen-game');
@@ -397,6 +502,10 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   $('game-turn-info').textContent = game.phase === 'roundEnd' || game.phase === 'gameOver'
     ? '' : (isMyTurn ? 'Your turn' : `${esc(names[curPid]?.name || '?')}'s turn`);
 
+  if (suppressTurnSound) { suppressTurnSound = false; wasMyTurn = isMyTurn; }
+  else { if (isMyTurn && !wasMyTurn) playSound(sndTurn); wasMyTurn = isMyTurn; }
+  maybeCelebrateKing(game, myId, curPid);
+
   // opponents strip
   const others = order.filter((pid) => pid !== myId);
   $('opponents').innerHTML = others.map((pid) => {
@@ -463,8 +572,12 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
     const canSwap = isMyTurn && game.holding;
     let inner;
     if (c.faceUp) {
-      const red = RED_SUITS.has(c.suit) ? ' red' : '';
-      inner = `<div class="card-face${red}${canSwap ? ' swap-target' : ''}"><span class="rank">${esc(c.rank)}</span><span class="suit">${SUIT_SYMBOL[c.suit]}</span></div>`;
+      if (c.rank === 'K') {
+        inner = `<div class="card-face king-face${canSwap ? ' swap-target' : ''}" style="background-image:url('${KING_ART[c.suit]}')"></div>`;
+      } else {
+        const red = RED_SUITS.has(c.suit) ? ' red' : '';
+        inner = `<div class="card-face${red}${canSwap ? ' swap-target' : ''}"><span class="rank">${esc(c.rank)}</span><span class="suit">${SUIT_SYMBOL[c.suit]}</span></div>`;
+      }
     } else {
       inner = `<div class="card-back${canRevealCol ? ' reveal-target' : ''}" style="${backStyle}"></div>`;
     }
@@ -504,8 +617,11 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   } else hide($('gameover-panel'));
 }
 
+const KING_ART = { S: 'kingart/S.jpg', H: 'kingart/H.jpg', D: 'kingart/D.jpg', C: 'kingart/C.jpg' };
+
 function cardFaceHtml(card) {
   const red = RED_SUITS.has(card.suit) ? ' red' : '';
+  if (card.rank === 'K') return `<div class="card-face king-face" style="background-image:url('${KING_ART[card.suit]}')"></div>`;
   return `<div class="card-face${red}"><span class="rank">${esc(card.rank)}</span><span class="suit">${SUIT_SYMBOL[card.suit]}</span></div>`;
 }
 function cardMiniHtml(cell, cardBackId) {
@@ -515,6 +631,7 @@ function cardMiniHtml(cell, cardBackId) {
 }
 
 function wireGameInteractions(game, myId, isMyTurn, cols) {
+  const me = game.players[myId];
   const canDraw = isMyTurn && game.revealed[myId] && !game.holding;
   $('pile-deck').onclick = () => { if (canDraw) sendMove({ type: 'draw', from: 'deck' }); };
   $('pile-burn').onclick = () => {
@@ -533,6 +650,18 @@ function wireGameInteractions(game, myId, isMyTurn, cols) {
         const col = idx % cols;
         sendMove({ type: 'revealColumn', col });
       } else if (isMyTurn && game.holding) {
+        const heldCard = game.holding.card;
+        const removedCard = me.cells[idx];
+        const holdingEl = document.querySelector('#holding-slot .card-face');
+        const cellEl = el.querySelector('.card-face, .card-back');
+        const burnEl = $('pile-burn');
+        if (holdingEl && cellEl) {
+          const fromRect = holdingEl.getBoundingClientRect();
+          const toRect = cellEl.getBoundingClientRect();
+          spawnFlyingCard(heldCard, fromRect, toRect);
+          if (burnEl) spawnFlyingCard(removedCard, toRect, burnEl.getBoundingClientRect());
+        }
+        playSound(sndSwap);
         sendMove({ type: 'swap', index: idx });
       }
     };
