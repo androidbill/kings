@@ -598,7 +598,6 @@ let soloState = null;
 let soloIds = [];
 let soloBotDifficulty = {};
 let botTimer = null;
-let currentBotTurnPid = null; // which bot the "thinking" delay has already been paid for this turn
 let soloTurnSeconds = 30;
 let soloTurnStartedAt = null;
 
@@ -616,7 +615,6 @@ function startSolo({ botCount, difficulties, deckCount, layout, turnSeconds }) {
   celebratedKingIds = new Set();
   soloTurnSeconds = turnSeconds || 30;
   soloTurnStartedAt = Date.now();
-  currentBotTurnPid = null;
   soloState = newGame({ playerIds: soloIds, deckCount, layout, seed: Date.now() % 2147483647 });
   soloPlayPhaseMoves = 0;
   showScreen('screen-game');
@@ -645,13 +643,8 @@ function scheduleBotTurn() {
   clearTimeout(botTimer);
   if (!soloState || soloState.phase === 'gameOver' || soloState.phase === 'roundEnd') return;
   const pid = currentPlayer(soloState);
-  if (pid === 'you') { currentBotTurnPid = null; return; }
-  // Only the first action of a bot's turn gets the "thinking" pause — reveal, draw,
-  // and act all happen back-to-back quickly once that's paid, so a full bot turn
-  // doesn't take 3x as long as it feels like it should.
-  const isFirstActionThisTurn = pid !== currentBotTurnPid;
-  currentBotTurnPid = pid;
-  const delay = isFirstActionThisTurn ? 2000 + Math.random() * 500 : 200;
+  if (pid === 'you') return;
+  // No pause — bots act as fast as the browser can render each step.
   botTimer = setTimeout(() => {
     const diff = soloBotDifficulty[pid];
     const before = soloState.phase;
@@ -662,11 +655,10 @@ function scheduleBotTurn() {
     if (soloState.phase === 'play' && before === 'play') soloPlayPhaseMoves++; else soloPlayPhaseMoves = 0;
     if (currentPlayer(soloState) !== pid || soloState.phase === 'roundEnd' || soloState.phase === 'gameOver') {
       soloTurnStartedAt = Date.now();
-      currentBotTurnPid = null;
     }
     renderSoloGame();
     scheduleBotTurn();
-  }, delay);
+  }, 0);
 }
 
 function renderSoloGame() {
