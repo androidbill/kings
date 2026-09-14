@@ -89,9 +89,11 @@
         </select>
       </label>
       <div id="lobby-cardback-picker" class="cardback-picker"></div>
-      <label>Color theme
-        <select id="set-theme"></select>
-      </label>
+      <label>Color theme</label>
+      <div class="theme-dropdown" id="lobby-theme-dropdown">
+        <button type="button" class="theme-dropdown-btn" id="lobby-theme-btn"></button>
+        <div class="theme-dropdown-list hidden" id="lobby-theme-list"></div>
+      </div>
     </div>
 
     <button id="lobby-start" class="btn btn-primary">Start Game</button>
@@ -139,9 +141,11 @@
       </select>
     </label>
     <div id="solo-cardback-picker" class="cardback-picker"></div>
-    <label>Color theme
-      <select id="solo-theme"></select>
-    </label>
+    <label>Color theme</label>
+    <div class="theme-dropdown" id="solo-theme-dropdown">
+      <button type="button" class="theme-dropdown-btn" id="solo-theme-btn"></button>
+      <div class="theme-dropdown-list hidden" id="solo-theme-list"></div>
+    </div>
     <button id="solo-start" class="btn btn-primary">Start</button>
     <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
   </div>

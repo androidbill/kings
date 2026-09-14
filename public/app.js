@@ -6,7 +6,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { WORD_CODES } from './wordcodes.js';
 import { APP_VERSION } from './version.js';
 import { CARD_BACKS, cardBackById } from './cardbacks.js';
-import { THEMES, applyTheme } from './themes.js';
+import { THEMES, themeById, applyTheme } from './themes.js';
 import {
   newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore, layoutCols,
 } from './rules.js';
@@ -414,12 +414,13 @@ function renderLobby() {
   });
   const roomTheme = room.settings.theme || 'classic';
   applyTheme(roomTheme);
-  populateThemeSelect($('set-theme'));
-  $('set-theme').value = roomTheme;
+  renderThemeDropdown('lobby', roomTheme, isHost, (id) => {
+    applyTheme(id);
+    update(roomRef(currentRoomCode, 'settings'), { theme: id });
+  });
   $('set-deck-count').disabled = !isHost;
   $('set-layout').disabled = !isHost;
   $('set-turn-seconds').disabled = !isHost;
-  $('set-theme').disabled = !isHost;
 
   const activeCount = order.filter((pid) => room.players?.[pid] && !room.players[pid].left).length;
   $('lobby-deck-hint').textContent = deckHintText(activeCount || 1);
@@ -447,10 +448,30 @@ function renderCardBackPicker(container, selectedId, editable, onPick) {
   }
 }
 
-function populateThemeSelect(selectEl) {
-  if (selectEl.options.length) return; // built once, reused across renders
-  selectEl.innerHTML = THEMES.map((t) => `<option value="${t.id}">${esc(t.name)} — ${esc(t.desc)}</option>`).join('');
+function swatchStyle(t) { return `background:linear-gradient(135deg, ${t.gold}, ${t.goldDark})`; }
+
+// A custom dropdown, not a native <select> — options need a color swatch circle,
+// which <option> elements can't render.
+function renderThemeDropdown(prefix, selectedId, editable, onPick) {
+  const btn = $(`${prefix}-theme-btn`);
+  const list = $(`${prefix}-theme-list`);
+  const t = themeById(selectedId);
+  btn.innerHTML = `<span class="theme-swatch" style="${swatchStyle(t)}"></span><span class="theme-text"><span class="theme-name">${esc(t.name)}</span></span><span class="theme-caret">▾</span>`;
+  btn.disabled = !editable;
+  list.innerHTML = THEMES.map((th) => `<div class="theme-dropdown-option${th.id === selectedId ? ' selected' : ''}" data-id="${th.id}">
+    <span class="theme-swatch" style="${swatchStyle(th)}"></span>
+    <span class="theme-text"><span class="theme-name">${esc(th.name)}</span><span class="theme-desc">${esc(th.desc)}</span></span>
+  </div>`).join('');
+  btn.onclick = () => { if (editable) list.classList.toggle('hidden'); };
+  for (const opt of list.querySelectorAll('.theme-dropdown-option')) {
+    opt.onclick = () => { hide(list); onPick(opt.dataset.id); };
+  }
 }
+document.addEventListener('click', (e) => {
+  for (const list of document.querySelectorAll('.theme-dropdown-list')) {
+    if (!list.classList.contains('hidden') && !list.parentElement.contains(e.target)) hide(list);
+  }
+});
 
 $('set-deck-count').addEventListener('change', (e) => {
   if (isHost) update(roomRef(currentRoomCode, 'settings'), { deckCount: parseInt(e.target.value, 10) });
@@ -460,11 +481,6 @@ $('set-layout').addEventListener('change', (e) => {
 });
 $('set-turn-seconds').addEventListener('change', (e) => {
   if (isHost) update(roomRef(currentRoomCode, 'settings'), { turnSeconds: parseInt(e.target.value, 10) });
-});
-$('set-theme').addEventListener('change', (e) => {
-  if (!isHost) return;
-  applyTheme(e.target.value);
-  update(roomRef(currentRoomCode, 'settings'), { theme: e.target.value });
 });
 
 $('lobby-start').addEventListener('click', async () => {
@@ -582,6 +598,7 @@ let soloState = null;
 let soloIds = [];
 let soloBotDifficulty = {};
 let botTimer = null;
+let currentBotTurnPid = null; // which bot the "thinking" delay has already been paid for this turn
 let soloTurnSeconds = 30;
 let soloTurnStartedAt = null;
 
@@ -599,6 +616,7 @@ function startSolo({ botCount, difficulties, deckCount, layout, turnSeconds }) {
   celebratedKingIds = new Set();
   soloTurnSeconds = turnSeconds || 30;
   soloTurnStartedAt = Date.now();
+  currentBotTurnPid = null;
   soloState = newGame({ playerIds: soloIds, deckCount, layout, seed: Date.now() % 2147483647 });
   soloPlayPhaseMoves = 0;
   showScreen('screen-game');
@@ -627,7 +645,13 @@ function scheduleBotTurn() {
   clearTimeout(botTimer);
   if (!soloState || soloState.phase === 'gameOver' || soloState.phase === 'roundEnd') return;
   const pid = currentPlayer(soloState);
-  if (pid === 'you') return;
+  if (pid === 'you') { currentBotTurnPid = null; return; }
+  // Only the first action of a bot's turn gets the "thinking" pause — reveal, draw,
+  // and act all happen back-to-back quickly once that's paid, so a full bot turn
+  // doesn't take 3x as long as it feels like it should.
+  const isFirstActionThisTurn = pid !== currentBotTurnPid;
+  currentBotTurnPid = pid;
+  const delay = isFirstActionThisTurn ? 2000 + Math.random() * 500 : 200;
   botTimer = setTimeout(() => {
     const diff = soloBotDifficulty[pid];
     const before = soloState.phase;
@@ -638,10 +662,11 @@ function scheduleBotTurn() {
     if (soloState.phase === 'play' && before === 'play') soloPlayPhaseMoves++; else soloPlayPhaseMoves = 0;
     if (currentPlayer(soloState) !== pid || soloState.phase === 'roundEnd' || soloState.phase === 'gameOver') {
       soloTurnStartedAt = Date.now();
+      currentBotTurnPid = null;
     }
     renderSoloGame();
     scheduleBotTurn();
-  }, 2000 + Math.random() * 500);
+  }, delay);
 }
 
 function renderSoloGame() {
@@ -949,6 +974,11 @@ function pickSoloCardBack(id) {
   selectedCardBack = id; localStorage.setItem('kings_cardback', id);
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
 }
+function pickSoloTheme(id) {
+  selectedTheme = id; localStorage.setItem('kings_theme', id);
+  applyTheme(id);
+  renderThemeDropdown('solo', selectedTheme, true, pickSoloTheme);
+}
 function updateSoloDeckHint() {
   const botCount = parseInt($('solo-bot-count').value, 10);
   $('solo-deck-hint').textContent = deckHintText(botCount + 1);
@@ -958,17 +988,11 @@ $('btn-solo').addEventListener('click', () => {
   // Older builds stored a per-bot JSON array here — fall back cleanly if so.
   $('solo-bot-difficulty').value = ['easy', 'medium', 'hard'].includes(savedDiff) ? savedDiff : 'medium';
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
-  populateThemeSelect($('solo-theme'));
-  $('solo-theme').value = selectedTheme;
+  renderThemeDropdown('solo', selectedTheme, true, pickSoloTheme);
   updateSoloDeckHint();
   showScreen('screen-solo-setup');
 });
 $('solo-bot-count').addEventListener('change', updateSoloDeckHint);
-$('solo-theme').addEventListener('change', (e) => {
-  selectedTheme = e.target.value;
-  localStorage.setItem('kings_theme', selectedTheme);
-  applyTheme(selectedTheme);
-});
 $('solo-start').addEventListener('click', () => {
   const botCount = parseInt($('solo-bot-count').value, 10);
   const difficulty = $('solo-bot-difficulty').value;
