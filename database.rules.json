@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['createdAt'])"
+      }
+    },
+    "pulses": {
+      "$code": {
+        ".read": true,
+        ".write": true
+      }
+    }
+  }
+}

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b2e1f">
+<title>Kings</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="toast" class="toast hidden"></div>
+
+<button id="kebab-btn" class="kebab-btn" aria-label="Menu">⋮</button>
+<div id="kebab-menu" class="kebab-menu hidden">
+  <button id="menu-refresh">Refresh</button>
+  <button id="menu-share">Share</button>
+  <button id="menu-about">About</button>
+</div>
+
+<!-- HOME -->
+<section id="screen-home" class="screen">
+  <div class="home-wrap">
+    <img class="home-crown" src="icons/icon-192.png" alt="">
+    <h1>Kings</h1>
+    <p class="tagline">Flip. Swap. Burn. Lowest score wins.</p>
+    <button id="btn-host" class="btn btn-primary">Host Online Game</button>
+    <button id="btn-join" class="btn btn-secondary">Join Online Game</button>
+    <button id="btn-solo" class="btn btn-secondary">Solo vs Bots</button>
+    <button id="btn-rules" class="btn btn-link">How to Play</button>
+    <div id="install-banner" class="install-banner hidden">
+      <span>Add Kings to your home screen</span>
+      <button id="btn-install">Install</button>
+    </div>
+  </div>
+</section>
+
+<!-- JOIN -->
+<section id="screen-join" class="screen hidden">
+  <div class="panel">
+    <h2>Join Game</h2>
+    <input id="join-name" class="text-input" placeholder="Your name" maxlength="16">
+    <input id="join-code" class="text-input code-input" placeholder="ROOM CODE" maxlength="6" autocapitalize="characters">
+    <button id="join-submit" class="btn btn-primary">Join</button>
+    <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
+  </div>
+</section>
+
+<!-- LOBBY -->
+<section id="screen-lobby" class="screen hidden">
+  <div class="panel">
+    <h2>Room <span id="lobby-code"></span></h2>
+    <div id="lobby-players" class="lobby-players"></div>
+
+    <div id="lobby-settings" class="lobby-settings">
+      <label>Deck count
+        <select id="set-deck-count">
+          <option value="1">1 deck</option>
+          <option value="2">2 decks</option>
+        </select>
+      </label>
+      <label>Grid size
+        <select id="set-layout">
+          <option value="rows3">2 rows of 3</option>
+          <option value="rows4" selected>2 rows of 4</option>
+        </select>
+      </label>
+      <div id="lobby-cardback-picker" class="cardback-picker"></div>
+    </div>
+
+    <button id="lobby-start" class="btn btn-primary">Start Game</button>
+    <p id="lobby-wait-msg" class="muted hidden">Waiting for the host to start…</p>
+    <button class="btn btn-link back-btn" data-back="screen-home">Leave Room</button>
+  </div>
+</section>
+
+<!-- SOLO SETUP -->
+<section id="screen-solo-setup" class="screen hidden">
+  <div class="panel">
+    <h2>Solo vs Bots</h2>
+    <label>Number of bots
+      <select id="solo-bot-count">
+        <option value="1">1 bot</option>
+        <option value="2">2 bots</option>
+        <option value="3">3 bots</option>
+      </select>
+    </label>
+    <div id="solo-bot-difficulties" class="solo-bot-difficulties"></div>
+    <label>Deck count
+      <select id="solo-deck-count">
+        <option value="1">1 deck</option>
+        <option value="2">2 decks</option>
+      </select>
+    </label>
+    <label>Grid size
+      <select id="solo-layout">
+        <option value="rows3">2 rows of 3</option>
+        <option value="rows4" selected>2 rows of 4</option>
+      </select>
+    </label>
+    <div id="solo-cardback-picker" class="cardback-picker"></div>
+    <button id="solo-start" class="btn btn-primary">Start</button>
+    <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
+  </div>
+</section>
+
+<!-- GAME -->
+<section id="screen-game" class="screen hidden">
+  <div class="game-top">
+    <div id="game-round-info" class="game-round-info"></div>
+    <div id="game-turn-info" class="game-turn-info"></div>
+  </div>
+
+  <div id="opponents" class="opponents"></div>
+
+  <div class="table-center">
+    <div id="pile-deck" class="pile pile-deck">
+      <div class="card-back"></div>
+      <span id="deck-count" class="pile-count"></span>
+    </div>
+    <div id="holding-slot" class="holding-slot hidden"></div>
+    <div id="pile-burn" class="pile pile-burn"></div>
+  </div>
+
+  <div id="act-prompt" class="act-prompt"></div>
+
+  <div id="my-grid" class="my-grid"></div>
+  <div id="my-name" class="my-name"></div>
+
+  <div id="round-end-panel" class="overlay-panel hidden">
+    <h2>Round Over</h2>
+    <div id="round-end-scores" class="round-end-scores"></div>
+    <button id="round-end-next" class="btn btn-primary">Next Round</button>
+    <p id="round-end-wait" class="muted hidden">Waiting for the host…</p>
+  </div>
+
+  <div id="gameover-panel" class="overlay-panel hidden">
+    <h2 id="gameover-title">Game Over</h2>
+    <div id="gameover-standings" class="round-end-scores"></div>
+    <button id="gameover-home" class="btn btn-primary">Home</button>
+  </div>
+</section>
+
+<!-- RULES -->
+<section id="screen-rules" class="screen hidden">
+  <div class="panel rules-panel">
+    <h2>How to Play Kings</h2>
+    <div class="rules-text">
+      <p>Each player gets a grid of face-down cards (2 rows of 3 or 4, your host's choice). Lower total score is better — the highest score each round loses a life. Four lives and you're out.</p>
+      <p><strong>Card values:</strong> number cards = face value, J/Q = 10, King = 0, Ace = 1. Two matching ranks stacked in the same column cancel out to 0 for that column.</p>
+      <p><strong>Start of round:</strong> going in turn order, each player flips one column of their own grid face up.</p>
+      <p><strong>Your turn:</strong> draw from the deck (blind) or the burn pile (face up). A deck card can be discarded to the burn pile or swapped into any of your cells. A burn pile card must be swapped in — you can't burn it right back.</p>
+      <p><strong>Ending a round:</strong> the first player to get their whole grid face up ends the round — everyone else gets exactly one more turn, then all hands are revealed and scored.</p>
+    </div>
+    <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
+  </div>
+</section>
+
+<div id="about-modal" class="modal hidden">
+  <div class="modal-card">
+    <img src="icons/icon-192.png" class="about-icon" alt="">
+    <h3>Kings</h3>
+    <p id="about-version"></p>
+    <p>Created by: Bill Parsons</p>
+    <button id="about-close" class="btn btn-primary">Close</button>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

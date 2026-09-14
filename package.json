@@ -1,0 +1,14 @@
+{
+  "name": "kings",
+  "version": "1.0.0",
+  "description": "Kings — the low-score card game (Golf-style), online multiplayer PWA",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/engine-tests.mjs",
+    "tournament": "node scripts/bot-tournament.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.4"
+  }
+}
