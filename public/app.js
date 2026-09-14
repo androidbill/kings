@@ -96,6 +96,7 @@ let lastSeenRound = null;
 let lastSeenBurnTopId = null;
 let lastSeenHoldingId = null;
 let lastSeenCaller = null;
+let celebratedKingIds = new Set(); // a King already shown once (drawn or discarded) doesn't re-celebrate on pickup
 let roundEndKey = null;
 let roundEndRevealAt = null;
 let roundEndTimer = null;
@@ -117,16 +118,25 @@ function maybeCelebrateKing(game, myId, curPid, names) {
     lastSeenBurnTopId = null;
     lastSeenHoldingId = null;
     lastSeenCaller = null;
+    celebratedKingIds = new Set();
   }
   const burnTop = game.burnPile[game.burnPile.length - 1];
   if (burnTop && burnTop.id !== lastSeenBurnTopId) {
     lastSeenBurnTopId = burnTop.id;
-    if (burnTop.rank === 'K') { showKingCelebration(burnTop); shoutout('A King appears!', 'var(--gold)'); }
+    if (burnTop.rank === 'K' && !celebratedKingIds.has(burnTop.id)) {
+      celebratedKingIds.add(burnTop.id);
+      showKingCelebration(burnTop);
+      shoutout('A King appears!', 'var(--gold)');
+    }
   }
   if (game.holding && curPid === myId) {
     if (game.holding.card.id !== lastSeenHoldingId) {
       lastSeenHoldingId = game.holding.card.id;
-      if (game.holding.card.rank === 'K') { showKingCelebration(game.holding.card); shoutout('You found a King!', 'var(--gold)'); }
+      if (game.holding.card.rank === 'K' && !celebratedKingIds.has(game.holding.card.id)) {
+        celebratedKingIds.add(game.holding.card.id);
+        showKingCelebration(game.holding.card);
+        shoutout('You found a King!', 'var(--gold)');
+      }
     }
   } else {
     lastSeenHoldingId = null;
@@ -324,6 +334,7 @@ function enterRoom(code, hosting) {
   suppressTurnSound = true;
   lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null; lastAnnouncedPid = null;
   roundEndKey = null; roundEndRevealAt = null; clearTimeout(roundEndTimer);
+  celebratedKingIds = new Set();
   localStorage.setItem('kings_room', code);
   update(roomRef(code, 'players', playerId), { left: false }).catch(() => {});
   onDisconnect(roomRef(code, 'players', playerId, 'left')).set(true);
@@ -585,6 +596,7 @@ function startSolo({ botCount, difficulties, deckCount, layout, turnSeconds }) {
   suppressTurnSound = true;
   lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null; lastAnnouncedPid = null;
   roundEndKey = null; roundEndRevealAt = null; clearTimeout(roundEndTimer);
+  celebratedKingIds = new Set();
   soloTurnSeconds = turnSeconds || 30;
   soloTurnStartedAt = Date.now();
   soloState = newGame({ playerIds: soloIds, deckCount, layout, seed: Date.now() % 2147483647 });
