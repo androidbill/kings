@@ -196,16 +196,25 @@ $('kebab-btn').addEventListener('click', () => {
 document.addEventListener('click', (e) => {
   if (!$('kebab-menu').contains(e.target) && e.target !== $('kebab-btn')) hide($('kebab-menu'));
 });
-$('menu-refresh').addEventListener('click', async () => {
-  toast('Updating…');
+// A plain location.reload() can silently no-op on an installed PWA in some states,
+// leaving the player staring at a dead "Updating…" button. Force a genuinely new
+// navigation with a cache-busting query param, layered with fallbacks in case the
+// first approach is ignored — same pattern as HexColony's update flow.
+async function hardRefresh() {
   try {
     const regs = await navigator.serviceWorker?.getRegistrations();
     for (const r of regs || []) await r.unregister();
     const keys = await caches.keys();
     for (const k of keys) await caches.delete(k);
   } catch { /* ignore */ }
-  location.reload();
-});
+  const url = new URL(location.href);
+  url.searchParams.set('fresh', Date.now().toString(36));
+  location.replace(url.toString());
+  setTimeout(() => { location.href = url.toString(); }, 1200);
+  setTimeout(() => { location.reload(); }, 2600);
+}
+
+$('menu-refresh').addEventListener('click', () => { toast('Updating…'); hardRefresh(); });
 $('menu-share').addEventListener('click', async () => {
   const url = location.href.split('?')[0] + (currentRoomCode ? `?room=${currentRoomCode}` : '');
   try {
@@ -258,15 +267,9 @@ checkVersion();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkVersion(); });
 setInterval(checkVersion, 2 * 60 * 1000);
 
-$('update-refresh').addEventListener('click', async () => {
+$('update-refresh').addEventListener('click', () => {
   $('update-refresh').textContent = 'Updating…';
-  try {
-    const regs = await navigator.serviceWorker?.getRegistrations();
-    for (const r of regs || []) await r.unregister();
-    const keys = await caches.keys();
-    for (const k of keys) await caches.delete(k);
-  } catch { /* ignore */ }
-  location.reload();
+  hardRefresh();
 });
 
 // ---------------------------------------------------------------- service worker
