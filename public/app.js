@@ -6,7 +6,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { WORD_CODES } from './wordcodes.js';
 import { APP_VERSION } from './version.js';
 import { CARD_BACKS, cardBackById } from './cardbacks.js';
-import { THEMES, themeById, applyTheme } from './themes.js';
+import { THEMES, applyTheme } from './themes.js';
 import {
   newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore, layoutCols,
 } from './rules.js';
@@ -145,8 +145,8 @@ function spawnFlyingCard(card, fromRect, toRect) {
   const el = document.createElement('div');
   const fromCx = fromRect.left + fromRect.width / 2;
   const fromCy = fromRect.top + fromRect.height / 2;
-  el.style.left = `${fromCx - 30}px`;
-  el.style.top = `${fromCy - 42}px`;
+  el.style.left = `${fromCx - 34}px`;
+  el.style.top = `${fromCy - 48}px`;
   if (card.rank === 'K') {
     el.className = 'card-face king-face fly-card';
     el.style.backgroundImage = `url('${KING_ART[card.suit]}')`;
@@ -378,6 +378,12 @@ function renderRoom() {
 }
 
 // ---------------------------------------------------------------- lobby
+function deckHintText(playerCount) {
+  return playerCount >= 4
+    ? '4+ players need 2 decks — 2 rows of 4 or 5 works best.'
+    : 'For 1-3 players, 1 deck with 2 rows of 3 is recommended.';
+}
+
 function renderLobby() {
   const room = latestRoom;
   $('lobby-code').textContent = currentRoomCode;
@@ -397,15 +403,15 @@ function renderLobby() {
   });
   const roomTheme = room.settings.theme || 'classic';
   applyTheme(roomTheme);
-  renderThemePicker($('lobby-theme-picker'), roomTheme, isHost, (id) => {
-    applyTheme(id);
-    update(roomRef(currentRoomCode, 'settings'), { theme: id });
-  });
+  populateThemeSelect($('set-theme'));
+  $('set-theme').value = roomTheme;
   $('set-deck-count').disabled = !isHost;
   $('set-layout').disabled = !isHost;
   $('set-turn-seconds').disabled = !isHost;
+  $('set-theme').disabled = !isHost;
 
   const activeCount = order.filter((pid) => room.players?.[pid] && !room.players[pid].left).length;
+  $('lobby-deck-hint').textContent = deckHintText(activeCount || 1);
   if (isHost) {
     show($('lobby-start'));
     hide($('lobby-wait-msg'));
@@ -430,23 +436,9 @@ function renderCardBackPicker(container, selectedId, editable, onPick) {
   }
 }
 
-function renderThemePicker(container, selectedId, editable, onPick) {
-  container.innerHTML = THEMES.map((t) => {
-    const sel = t.id === selectedId ? ' selected' : '';
-    return `<div class="theme-option${sel}" data-id="${t.id}">
-      <span class="theme-swatch" style="background:linear-gradient(135deg, ${t.gold}, ${t.goldDark})"></span>
-      <span class="theme-text">
-        <span class="theme-name">${esc(t.name)}</span>
-        <span class="theme-desc">${esc(t.desc)}</span>
-      </span>
-      ${t.id === selectedId ? '<span class="theme-check">✓</span>' : ''}
-    </div>`;
-  }).join('');
-  if (editable) {
-    for (const el of container.querySelectorAll('.theme-option')) {
-      el.addEventListener('click', () => onPick(el.dataset.id));
-    }
-  }
+function populateThemeSelect(selectEl) {
+  if (selectEl.options.length) return; // built once, reused across renders
+  selectEl.innerHTML = THEMES.map((t) => `<option value="${t.id}">${esc(t.name)} — ${esc(t.desc)}</option>`).join('');
 }
 
 $('set-deck-count').addEventListener('change', (e) => {
@@ -458,6 +450,11 @@ $('set-layout').addEventListener('change', (e) => {
 $('set-turn-seconds').addEventListener('change', (e) => {
   if (isHost) update(roomRef(currentRoomCode, 'settings'), { turnSeconds: parseInt(e.target.value, 10) });
 });
+$('set-theme').addEventListener('change', (e) => {
+  if (!isHost) return;
+  applyTheme(e.target.value);
+  update(roomRef(currentRoomCode, 'settings'), { theme: e.target.value });
+});
 
 $('lobby-start').addEventListener('click', async () => {
   const room = latestRoom;
@@ -465,6 +462,10 @@ $('lobby-start').addEventListener('click', async () => {
   const size = gridSize(room.settings.layout);
   if (order.length * size + 1 > room.settings.deckCount * 52) {
     toast(`Not enough cards for ${order.length} players — add a deck or use a smaller grid`);
+    return;
+  }
+  if (order.length >= 4 && room.settings.deckCount < 2) {
+    toast('4+ players need 2 decks — change Deck count in the settings above');
     return;
   }
   const game = newGame({ playerIds: order, deckCount: room.settings.deckCount, layout: room.settings.layout, seed: Date.now() % 2147483647 });
@@ -736,7 +737,13 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
     </div>`;
   }).join('');
 
-  // piles
+  // piles — table-center shares #my-grid's column count so the deck lines up over
+  // the leftmost column and the discard pile over the rightmost.
+  const tableCenter = document.querySelector('.table-center');
+  tableCenter.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  $('pile-burn').style.gridColumn = String(cols);
+  $('holding-slot').style.gridColumn = `2 / ${cols}`;
+
   const canDrawNow = isMyTurn && game.revealed[myId] && !game.holding;
   const drawCount = game.drawPile.length;
   $('deck-count').textContent = drawCount;
@@ -926,46 +933,44 @@ $('join-submit').addEventListener('click', async () => {
 $('btn-rules').addEventListener('click', () => showScreen('screen-rules'));
 
 // ---------------------------------------------------------------- solo setup
-function renderSoloBotOptions() {
-  const count = parseInt($('solo-bot-count').value, 10);
-  const saved = JSON.parse(localStorage.getItem('kings_solo_diff') || '["medium","medium","medium"]');
-  $('solo-bot-difficulties').innerHTML = Array.from({ length: count }, (_, i) => `
-    <label>Bot ${i + 1} difficulty
-      <select data-bot-idx="${i}">
-        <option value="easy"${saved[i] === 'easy' ? ' selected' : ''}>Easy</option>
-        <option value="medium"${(!saved[i] || saved[i] === 'medium') ? ' selected' : ''}>Medium</option>
-        <option value="hard"${saved[i] === 'hard' ? ' selected' : ''}>Hard</option>
-      </select>
-    </label>`).join('');
-}
 function pickSoloCardBack(id) {
   selectedCardBack = id; localStorage.setItem('kings_cardback', id);
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
 }
-function pickSoloTheme(id) {
-  selectedTheme = id; localStorage.setItem('kings_theme', id);
-  applyTheme(id);
-  renderThemePicker($('solo-theme-picker'), selectedTheme, true, pickSoloTheme);
+function updateSoloDeckHint() {
+  const botCount = parseInt($('solo-bot-count').value, 10);
+  $('solo-deck-hint').textContent = deckHintText(botCount + 1);
 }
 $('btn-solo').addEventListener('click', () => {
-  renderSoloBotOptions();
+  const savedDiff = localStorage.getItem('kings_solo_diff');
+  // Older builds stored a per-bot JSON array here — fall back cleanly if so.
+  $('solo-bot-difficulty').value = ['easy', 'medium', 'hard'].includes(savedDiff) ? savedDiff : 'medium';
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
-  renderThemePicker($('solo-theme-picker'), selectedTheme, true, pickSoloTheme);
+  populateThemeSelect($('solo-theme'));
+  $('solo-theme').value = selectedTheme;
+  updateSoloDeckHint();
   showScreen('screen-solo-setup');
 });
-$('solo-bot-count').addEventListener('change', renderSoloBotOptions);
+$('solo-bot-count').addEventListener('change', updateSoloDeckHint);
+$('solo-theme').addEventListener('change', (e) => {
+  selectedTheme = e.target.value;
+  localStorage.setItem('kings_theme', selectedTheme);
+  applyTheme(selectedTheme);
+});
 $('solo-start').addEventListener('click', () => {
   const botCount = parseInt($('solo-bot-count').value, 10);
-  const difficulties = Array.from({ length: botCount }, (_, i) => {
-    const sel = document.querySelector(`[data-bot-idx="${i}"]`);
-    return sel ? sel.value : 'medium';
-  });
-  localStorage.setItem('kings_solo_diff', JSON.stringify(difficulties));
+  const difficulty = $('solo-bot-difficulty').value;
+  const difficulties = Array.from({ length: botCount }, () => difficulty);
+  localStorage.setItem('kings_solo_diff', difficulty);
   const deckCount = parseInt($('solo-deck-count').value, 10);
   const layout = $('solo-layout').value;
   const size = gridSize(layout);
   if ((botCount + 1) * size + 1 > deckCount * 52) {
     toast('Not enough cards for that many players — add a deck or use a smaller grid');
+    return;
+  }
+  if (botCount + 1 >= 4 && deckCount < 2) {
+    toast('4+ players need 2 decks — change Deck count above');
     return;
   }
   const turnSeconds = parseInt($('solo-turn-seconds').value, 10);

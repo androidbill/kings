@@ -81,6 +81,7 @@
           <option value="rows5">2 rows of 5</option>
         </select>
       </label>
+      <p id="lobby-deck-hint" class="muted deck-hint"></p>
       <label>Turn timer
         <select id="set-turn-seconds">
           <option value="30">30 seconds</option>
@@ -88,8 +89,9 @@
         </select>
       </label>
       <div id="lobby-cardback-picker" class="cardback-picker"></div>
-      <p class="picker-label">Color theme</p>
-      <div id="lobby-theme-picker" class="theme-picker"></div>
+      <label>Color theme
+        <select id="set-theme"></select>
+      </label>
     </div>
 
     <button id="lobby-start" class="btn btn-primary">Start Game</button>
@@ -109,7 +111,13 @@
         <option value="3">3 bots</option>
       </select>
     </label>
-    <div id="solo-bot-difficulties" class="solo-bot-difficulties"></div>
+    <label>Bot difficulty
+      <select id="solo-bot-difficulty">
+        <option value="easy">Easy</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard</option>
+      </select>
+    </label>
     <label>Deck count
       <select id="solo-deck-count">
         <option value="1">1 deck</option>
@@ -123,6 +131,7 @@
         <option value="rows5">2 rows of 5</option>
       </select>
     </label>
+    <p id="solo-deck-hint" class="muted deck-hint"></p>
     <label>Turn timer (for you — bots always move quickly)
       <select id="solo-turn-seconds">
         <option value="30">30 seconds</option>
@@ -130,8 +139,9 @@
       </select>
     </label>
     <div id="solo-cardback-picker" class="cardback-picker"></div>
-    <p class="picker-label">Color theme</p>
-    <div id="solo-theme-picker" class="theme-picker"></div>
+    <label>Color theme
+      <select id="solo-theme"></select>
+    </label>
     <button id="solo-start" class="btn btn-primary">Start</button>
     <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
   </div>
