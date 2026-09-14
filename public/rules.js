@@ -75,10 +75,14 @@ export function newGame({ playerIds, deckCount, layout, seed }) {
     players,
     drawPile,
     burnPile: [burnTop],
-    phase: 'reveal', // 'reveal' -> 'play' -> 'lastTurn' -> 'roundEnd' -> 'gameOver'
+    phase: 'play', // 'play' -> 'lastTurn' -> 'roundEnd' -> 'gameOver'
     dealer: 0, // index into order
     turnIndex: 0, // index into order (skips eliminated players) — set below to left of dealer
-    revealed: {}, // playerId -> true once they've done their reveal flip
+    // playerId -> true once they've flipped their reveal column. A player's very
+    // first turn each round is: reveal a column, THEN immediately take a full normal
+    // turn (draw/discard-or-swap) before play passes to the next player — it is not
+    // a separate go-around.
+    revealed: {},
     caller: null, // playerId who went all-face-up first
     lastTurnRemaining: [], // playerIds still owed a final turn
     round: 1,
@@ -128,32 +132,21 @@ export function applyMove(gameIn, pid, move) {
   if (game.phase === 'gameOver') throw new Error('game is over');
   if (game.players[pid]?.out) throw new Error('player is out');
 
-  if (game.phase === 'reveal') return applyReveal(game, pid, move);
   if (game.phase === 'play' || game.phase === 'lastTurn') return applyPlay(game, pid, move);
   throw new Error(`no moves accepted in phase ${game.phase}`);
 }
 
-function applyReveal(game, pid, move) {
-  if (currentPlayer(game) !== pid) throw new Error('not your turn');
-  if (move.type !== 'revealColumn') throw new Error('must reveal a column');
-  const cols = columnIndices(game.layout, move.col);
-  const cells = game.players[pid].cells;
-  for (const i of cols) cells[i].faceUp = true;
-  game.revealed[pid] = true;
-
-  const order = activeOrder(game);
-  const doneCount = order.filter((p) => game.revealed[p]).length;
-  if (doneCount >= order.length) {
-    game.phase = 'play';
-    game.turnIndex = nextTurnIndex(game, game.dealer);
-  } else {
-    game.turnIndex = nextTurnIndex(game, game.turnIndex);
-  }
-  return game;
-}
-
 function applyPlay(game, pid, move) {
   if (currentPlayer(game) !== pid) throw new Error('not your turn');
+
+  if (!game.revealed[pid]) {
+    if (move.type !== 'revealColumn') throw new Error('must reveal a column first');
+    const cols = columnIndices(game.layout, move.col);
+    for (const i of cols) game.players[pid].cells[i].faceUp = true;
+    game.revealed[pid] = true;
+    return game; // same player's turn continues — they now draw as normal
+  }
+  if (move.type === 'revealColumn') throw new Error('already revealed this round');
 
   if (move.type === 'draw') {
     if (game.holding) throw new Error('already holding a card, must play it first');
@@ -216,6 +209,9 @@ function checkAllFaceUp(game, pid) {
 function advanceTurnAfterAction(game, pid) {
   if (game.phase === 'lastTurn') {
     game.lastTurnRemaining = game.lastTurnRemaining.filter((p) => p !== pid);
+    // Whatever they decided on their one remaining turn, their hand is now locked in —
+    // reveal the rest of it immediately rather than waiting for everyone else to finish.
+    for (const cell of game.players[pid].cells) cell.faceUp = true;
     if (game.lastTurnRemaining.length === 0) {
       finishRound(game);
       return;
@@ -239,6 +235,25 @@ export function playerScore(cells, layout) {
   let total = 0;
   for (let c = 0; c < cols; c++) total += columnScore(cells, layout, c);
   return total;
+}
+
+// The score from only what's currently visible on the table — every face-down cell
+// is simply not counted, same as a human watching would tally it. Used for the live
+// running score display; never leaks a hidden card's value.
+export function visibleScore(cells, layout) {
+  const cols = layout === 'rows3' ? 3 : 4;
+  let total = 0;
+  let hiddenCount = 0;
+  for (let c = 0; c < cols; c++) {
+    const [a, b] = columnIndices(layout, c);
+    const ca = cells[a], cb = cells[b];
+    if (ca.faceUp && cb.faceUp) total += ca.rank === cb.rank ? 0 : rankValue(ca.rank) + rankValue(cb.rank);
+    else if (ca.faceUp) total += rankValue(ca.rank);
+    else if (cb.faceUp) total += rankValue(cb.rank);
+    if (!ca.faceUp) hiddenCount++;
+    if (!cb.faceUp) hiddenCount++;
+  }
+  return { total, hiddenCount };
 }
 
 function finishRound(game) {
@@ -280,7 +295,7 @@ export function startNextRound(gameIn, { seed } = {}) {
   const burnTop = deck[cursor++];
   game.drawPile = deck.slice(cursor);
   game.burnPile = [burnTop];
-  game.phase = 'reveal';
+  game.phase = 'play';
   game.revealed = {};
   game.caller = null;
   game.lastTurnRemaining = [];

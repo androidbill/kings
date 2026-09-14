@@ -108,7 +108,7 @@ export function botActMove(game, pid, difficulty, forceProgress = false) {
 }
 
 export function pickBotMove(game, pid, difficulty, forceProgress = false) {
-  if (game.phase === 'reveal') return botRevealMove(game, pid, difficulty);
+  if (!game.revealed[pid]) return botRevealMove(game, pid, difficulty);
   if (!game.holding) return botDrawMove(game, pid, difficulty);
   return botActMove(game, pid, difficulty, forceProgress);
 }

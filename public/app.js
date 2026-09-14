@@ -7,7 +7,7 @@ import { WORD_CODES } from './wordcodes.js';
 import { APP_VERSION } from './version.js';
 import { CARD_BACKS, cardBackById } from './cardbacks.js';
 import {
-  newGame, applyMove, startNextRound, currentPlayer, gridSize,
+  newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore,
 } from './rules.js';
 import { pickBotMove } from './bot.js';
 
@@ -356,25 +356,29 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
     const outCls = p.out ? ' is-out' : '';
     const gridCols = game.layout === 'rows3' ? 3 : 4;
     const cells = p.cells.map((c) => cardMiniHtml(c, cardBackId)).join('');
+    const vs = visibleScore(p.cells, game.layout);
+    const scoreLabel = `${vs.total}${vs.hiddenCount ? ` +${vs.hiddenCount}?` : ''}`;
     return `<div class="opponent${isTurn}${outCls}">
       <div class="opponent-name">${esc(names[pid]?.name || '?')}</div>
+      <div class="opponent-score">${scoreLabel} pts</div>
       <div class="opponent-lives">${'❤'.repeat(Math.max(0, p.lives))}</div>
       <div class="opponent-grid" style="grid-template-columns:repeat(${gridCols},1fr)">${cells}</div>
     </div>`;
   }).join('');
 
   // piles
+  const canDrawNow = isMyTurn && game.revealed[myId] && !game.holding;
   const drawCount = game.drawPile.length;
   $('deck-count').textContent = drawCount;
   const deckPile = $('pile-deck');
-  deckPile.classList.toggle('disabled', !(isMyTurn && !game.holding));
+  deckPile.classList.toggle('disabled', !canDrawNow);
   const backStyle = cardBackStyle(cardBackId);
   deckPile.querySelector('.card-back').setAttribute('style', backStyle);
 
   const burnTop = game.burnPile[game.burnPile.length - 1];
   const burnPile = $('pile-burn');
   burnPile.innerHTML = burnTop ? cardFaceHtml(burnTop) : '<div class="card-back" style="visibility:hidden"></div>';
-  burnPile.classList.toggle('disabled', !(isMyTurn && !game.holding && game.burnPile.length > 0));
+  burnPile.classList.toggle('disabled', !(canDrawNow && game.burnPile.length > 0));
 
   const holdingSlot = $('holding-slot');
   if (game.holding && curPid === myId) {
@@ -384,8 +388,8 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
 
   // act prompt
   let prompt = '';
-  if (game.phase === 'reveal') {
-    prompt = curPid === myId ? 'Pick one column to flip face up' : `Waiting on ${esc(names[curPid]?.name || '?')}`;
+  if (isMyTurn && !game.revealed[myId]) {
+    prompt = 'Pick one column to flip face up, then take your turn';
   } else if (isMyTurn) {
     if (!game.holding) prompt = 'Draw from the deck or the burn pile';
     else if (game.holding.from === 'burn') prompt = 'Tap one of your cards to swap it in';
@@ -397,11 +401,14 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   $('act-prompt').textContent = prompt;
 
   // my grid
-  $('my-name').textContent = me?.out ? `${names[myId]?.name || 'You'} (out)` : (names[myId]?.name || 'You');
+  const myVs = visibleScore(me.cells, game.layout);
+  const myScoreLabel = `${myVs.total}${myVs.hiddenCount ? ` +${myVs.hiddenCount}?` : ''} pts`;
+  const myBase = names[myId]?.name || 'You';
+  $('my-name').textContent = me?.out ? `${myBase} (out) — ${myScoreLabel}` : `${myBase} — ${myScoreLabel}`;
   const myGrid = $('my-grid');
   myGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   myGrid.innerHTML = me.cells.map((c, idx) => {
-    const canRevealCol = game.phase === 'reveal' && curPid === myId;
+    const canRevealCol = isMyTurn && !game.revealed[myId];
     const canSwap = isMyTurn && game.holding;
     let inner;
     if (c.faceUp) {
@@ -457,13 +464,14 @@ function cardMiniHtml(cell, cardBackId) {
 }
 
 function wireGameInteractions(game, myId, isMyTurn, cols) {
-  $('pile-deck').onclick = () => { if (isMyTurn && !game.holding) sendMove({ type: 'draw', from: 'deck' }); };
-  $('pile-burn').onclick = () => { if (isMyTurn && !game.holding && game.burnPile.length) sendMove({ type: 'draw', from: 'burn' }); };
+  const canDraw = isMyTurn && game.revealed[myId] && !game.holding;
+  $('pile-deck').onclick = () => { if (canDraw) sendMove({ type: 'draw', from: 'deck' }); };
+  $('pile-burn').onclick = () => { if (canDraw && game.burnPile.length) sendMove({ type: 'draw', from: 'burn' }); };
 
   for (const el of document.querySelectorAll('#my-grid .cell-wrap')) {
     el.onclick = () => {
       const idx = parseInt(el.dataset.idx, 10);
-      if (game.phase === 'reveal' && currentPlayer(game) === myId) {
+      if (isMyTurn && !game.revealed[myId]) {
         const col = idx % cols;
         sendMove({ type: 'revealColumn', col });
       } else if (isMyTurn && game.holding) {
