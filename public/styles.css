@@ -46,7 +46,11 @@ button { font-family: inherit; cursor: pointer; }
   width: 100%;
   max-width: 420px;
 }
-.home-crown { width: 96px; height: 96px; border-radius: 22px; margin-bottom: 6px; }
+.home-king {
+  width: 108px; aspect-ratio: 5 / 7; object-fit: cover;
+  border-radius: 10px; margin-bottom: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
 .home-wrap h1 { font-size: 2.4em; margin: 0; letter-spacing: 0.05em; color: var(--gold); }
 .tagline { color: var(--muted); margin: 0 0 20px; text-align: center; }
 
@@ -131,9 +135,29 @@ select option {
 }
 .cardback-option.selected { border-color: var(--gold); }
 
+.picker-label { color: var(--muted); font-size: 0.85em; margin: 10px 0 2px; }
+.theme-picker { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; }
+.theme-option {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  cursor: pointer; text-align: left;
+}
+.theme-option.selected { border-color: var(--gold); background: rgba(255,255,255,0.09); }
+.theme-swatch {
+  width: 36px; height: 36px; border-radius: 50%; flex: 0 0 auto;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.25);
+}
+.theme-text { display: flex; flex-direction: column; gap: 1px; }
+.theme-option .theme-name { font-weight: 700; color: var(--text); font-size: 0.95em; }
+.theme-option .theme-desc { font-size: 0.8em; color: var(--muted); }
+.theme-option .theme-check { margin-left: auto; color: var(--gold); font-weight: 800; }
+
 /* ---------------------------------------------------------------- kebab */
 .version-label {
-  position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 12px;
+  position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 50%;
+  transform: translateX(-50%);
   z-index: 50; color: var(--muted); font-size: 11px; opacity: 0.7;
 }
 
@@ -165,6 +189,36 @@ select option {
   padding: 8px 14px; border: none; border-radius: 999px;
   background: #241a03; color: #fff; font-family: inherit;
   font-size: 13px; font-weight: 800; cursor: pointer;
+}
+
+/* Announces something worth everyone looking up for — your turn, a King, someone
+   going all face up — big and centered rather than buried in the act-prompt line.
+   Same pattern as HexColony's shoutout: a pill that pops in, holds, and fades. */
+.shoutout {
+  position: fixed; inset: 0; z-index: 180;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 22vh;
+  pointer-events: none;
+}
+.shoutout-card {
+  --c: var(--gold);
+  max-width: calc(100vw - 40px);
+  background: rgba(6, 20, 14, 0.95);
+  border: 2px solid var(--c);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 6px rgba(0,0,0,0.18);
+  padding: 14px 26px;
+  font-size: 22px; font-weight: 800; letter-spacing: 0.2px;
+  color: var(--text);
+  text-align: center;
+  opacity: 0;
+}
+.shoutout-card.show { animation: shoutout-pop 2.2s ease forwards; }
+@keyframes shoutout-pop {
+  0%   { opacity: 0; transform: translateY(12px) scale(0.92); }
+  10%  { opacity: 1; transform: translateY(0) scale(1); }
+  82%  { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.97); }
 }
 
 .toast {

@@ -10,6 +10,7 @@ const CORE = [
   'rules.js',
   'bot.js',
   'cardbacks.js',
+  'themes.js',
   'wordcodes.js',
   'version.js',
   'firebase-config.js',

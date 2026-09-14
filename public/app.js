@@ -6,6 +6,7 @@ import { firebaseConfig } from './firebase-config.js';
 import { WORD_CODES } from './wordcodes.js';
 import { APP_VERSION } from './version.js';
 import { CARD_BACKS, cardBackById } from './cardbacks.js';
+import { THEMES, themeById, applyTheme } from './themes.js';
 import {
   newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore, layoutCols,
 } from './rules.js';
@@ -68,12 +69,36 @@ function playSound(audio) {
   try { audio.currentTime = 0; audio.play().catch(() => {}); } catch { /* ignore */ }
 }
 
+// ---------------------------------------------------------------- shoutouts (HexColony-style)
+// A big centered pill announcing something worth looking up for — pops in, holds,
+// fades. Same visual language as HexColony's shoutout.
+let shoutTimer = null;
+function shoutout(msg, accent, duration = 2200) {
+  const box = $('shoutout');
+  const card = $('shoutout-card');
+  card.textContent = msg;
+  card.style.setProperty('--c', accent || 'var(--gold)');
+  show(box);
+  // Removing the class and reading layout before re-adding it is what restarts the
+  // CSS animation — otherwise a second shoutout right after the first never replays.
+  card.classList.remove('show');
+  void card.offsetWidth;
+  card.classList.add('show');
+  clearTimeout(shoutTimer);
+  shoutTimer = setTimeout(() => { card.classList.remove('show'); hide(box); }, duration);
+}
+
 // ---------------------------------------------------------------- turn-change / King fx tracking
 let wasMyTurn = false;
 let suppressTurnSound = true; // true right after entering a game so the first render never chimes
+let lastAnnouncedPid = null;
 let lastSeenRound = null;
 let lastSeenBurnTopId = null;
 let lastSeenHoldingId = null;
+let lastSeenCaller = null;
+let roundEndKey = null;
+let roundEndRevealAt = null;
+let roundEndTimer = null;
 
 // A drawn or newly-discarded King gets a big spinning showcase — half the screen width
 // (capped so it doesn't get absurd on a tablet), matching what was asked for.
@@ -86,24 +111,30 @@ function showKingCelebration(card) {
   wrap.querySelector('.king-card-face').addEventListener('animationend', () => wrap.remove());
 }
 
-function maybeCelebrateKing(game, myId, curPid) {
+function maybeCelebrateKing(game, myId, curPid, names) {
   if (game.round !== lastSeenRound) {
     lastSeenRound = game.round;
     lastSeenBurnTopId = null;
     lastSeenHoldingId = null;
+    lastSeenCaller = null;
   }
   const burnTop = game.burnPile[game.burnPile.length - 1];
   if (burnTop && burnTop.id !== lastSeenBurnTopId) {
     lastSeenBurnTopId = burnTop.id;
-    if (burnTop.rank === 'K') showKingCelebration(burnTop);
+    if (burnTop.rank === 'K') { showKingCelebration(burnTop); shoutout('A King appears!', 'var(--gold)'); }
   }
   if (game.holding && curPid === myId) {
     if (game.holding.card.id !== lastSeenHoldingId) {
       lastSeenHoldingId = game.holding.card.id;
-      if (game.holding.card.rank === 'K') showKingCelebration(game.holding.card);
+      if (game.holding.card.rank === 'K') { showKingCelebration(game.holding.card); shoutout('You found a King!', 'var(--gold)'); }
     }
   } else {
     lastSeenHoldingId = null;
+  }
+  if (game.caller && game.caller !== lastSeenCaller) {
+    lastSeenCaller = game.caller;
+    const label = game.caller === myId ? 'You are' : `${names[game.caller]?.name || 'Someone'} is`;
+    shoutout(`${label} all face up!`, 'var(--danger)');
   }
 }
 
@@ -242,6 +273,8 @@ let turnTimerInterval = null;
 let autoPlayBusy = false; // prevents overlapping timeout-fallback transactions while one is in flight
 let soloMode = null; // { botCount, difficulties: [] } when playing solo
 let selectedCardBack = localStorage.getItem('kings_cardback') || 'crown';
+let selectedTheme = localStorage.getItem('kings_theme') || 'classic';
+applyTheme(selectedTheme);
 
 function roomRef(code, ...path) { return ref(db, ['rooms', code, ...path].join('/')); }
 
@@ -261,7 +294,7 @@ async function createRoom(name) {
     createdAt: Date.now(),
     hostId: playerId,
     status: 'lobby',
-    settings: { deckCount: 1, layout: 'rows4', cardBack: selectedCardBack, turnSeconds: 30 },
+    settings: { deckCount: 1, layout: 'rows4', cardBack: selectedCardBack, turnSeconds: 30, theme: selectedTheme },
     players: { [playerId]: { name: myName, joinedAt: Date.now() } },
     order: [playerId],
   };
@@ -289,7 +322,8 @@ function enterRoom(code, hosting) {
   currentRoomCode = code;
   isHost = hosting;
   suppressTurnSound = true;
-  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null;
+  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null; lastAnnouncedPid = null;
+  roundEndKey = null; roundEndRevealAt = null; clearTimeout(roundEndTimer);
   localStorage.setItem('kings_room', code);
   update(roomRef(code, 'players', playerId), { left: false }).catch(() => {});
   onDisconnect(roomRef(code, 'players', playerId, 'left')).set(true);
@@ -313,11 +347,14 @@ function leaveRoom() {
   latestRoom = null;
   soloMode = null;
   localStorage.removeItem('kings_room');
+  applyTheme(selectedTheme); // a joined room's theme shouldn't stick around after leaving
 }
 
 async function quitGame() {
   if (soloMode) {
     clearTimeout(botTimer);
+    clearInterval(turnTimerInterval);
+    hide($('turn-timer'));
     clearSoloSave();
     soloMode = null;
     soloState = null;
@@ -358,6 +395,12 @@ function renderLobby() {
   renderCardBackPicker($('lobby-cardback-picker'), room.settings.cardBack, isHost, (id) => {
     update(roomRef(currentRoomCode, 'settings'), { cardBack: id });
   });
+  const roomTheme = room.settings.theme || 'classic';
+  applyTheme(roomTheme);
+  renderThemePicker($('lobby-theme-picker'), roomTheme, isHost, (id) => {
+    applyTheme(id);
+    update(roomRef(currentRoomCode, 'settings'), { theme: id });
+  });
   $('set-deck-count').disabled = !isHost;
   $('set-layout').disabled = !isHost;
   $('set-turn-seconds').disabled = !isHost;
@@ -382,6 +425,25 @@ function renderCardBackPicker(container, selectedId, editable, onPick) {
   }).join('');
   if (editable) {
     for (const el of container.querySelectorAll('.cardback-option')) {
+      el.addEventListener('click', () => onPick(el.dataset.id));
+    }
+  }
+}
+
+function renderThemePicker(container, selectedId, editable, onPick) {
+  container.innerHTML = THEMES.map((t) => {
+    const sel = t.id === selectedId ? ' selected' : '';
+    return `<div class="theme-option${sel}" data-id="${t.id}">
+      <span class="theme-swatch" style="background:linear-gradient(135deg, ${t.gold}, ${t.goldDark})"></span>
+      <span class="theme-text">
+        <span class="theme-name">${esc(t.name)}</span>
+        <span class="theme-desc">${esc(t.desc)}</span>
+      </span>
+      ${t.id === selectedId ? '<span class="theme-check">✓</span>' : ''}
+    </div>`;
+  }).join('');
+  if (editable) {
+    for (const el of container.querySelectorAll('.theme-option')) {
       el.addEventListener('click', () => onPick(el.dataset.id));
     }
   }
@@ -431,10 +493,33 @@ async function sendMove(move, actingPid = playerId) {
 }
 
 // Bare number, tabular-nums, gold when it's yours, pulsing red under 5s — same
-// treatment as HexColony's board-timer pill.
+// treatment as HexColony's board-timer pill. Handles both online (server-synced via
+// RTDB's clock offset) and solo (plain local Date.now(), single device, no sync needed).
 function tickTurnTimer() {
-  const room = latestRoom;
   const timerEl = $('turn-timer');
+
+  if (soloMode) {
+    const game = soloState;
+    if (!game || (game.phase !== 'play' && game.phase !== 'lastTurn') || !soloTurnStartedAt) {
+      hide(timerEl);
+      return;
+    }
+    const remainingMs = soloTurnStartedAt + soloTurnSeconds * 1000 - Date.now();
+    const curPid = currentPlayer(game);
+    const mine = curPid === 'you';
+    renderTimerPill(timerEl, remainingMs, mine);
+    // Bots already move on their own fast timer — this fallback only ever needs to
+    // cover the human sitting on a decision too long.
+    if (mine && remainingMs <= 0 && !autoPlayBusy) {
+      autoPlayBusy = true;
+      (async () => applySoloMove(pickBotMove(game, 'you', 'medium', true)))()
+        .catch((err) => console.error('solo turn-timeout auto-play failed', err))
+        .finally(() => { autoPlayBusy = false; });
+    }
+    return;
+  }
+
+  const room = latestRoom;
   const game = room?.game;
   if (!room || room.status !== 'active' || !game || (game.phase !== 'play' && game.phase !== 'lastTurn')) {
     hide(timerEl);
@@ -445,14 +530,9 @@ function tickTurnTimer() {
   if (!startedAt) { hide(timerEl); return; }
 
   const remainingMs = startedAt + turnSeconds * 1000 - serverNow();
-  const secs = Math.max(0, Math.ceil(remainingMs / 1000));
   const curPid = currentPlayer(game);
   const mine = curPid === playerId;
-
-  show(timerEl);
-  timerEl.textContent = String(secs);
-  timerEl.classList.toggle('mine', mine);
-  timerEl.classList.toggle('urgent', secs <= 5);
+  renderTimerPill(timerEl, remainingMs, mine);
 
   if (remainingMs <= 0 && !autoPlayBusy) {
     // pickBotMove runs synchronously — if it ever throws, autoPlayBusy must still be
@@ -467,8 +547,16 @@ function tickTurnTimer() {
   }
 }
 
+function renderTimerPill(timerEl, remainingMs, mine) {
+  const secs = Math.max(0, Math.ceil(remainingMs / 1000));
+  show(timerEl);
+  timerEl.textContent = String(secs);
+  timerEl.classList.toggle('mine', mine);
+  timerEl.classList.toggle('urgent', secs <= 5);
+}
+
 async function requestNextRound() {
-  if (soloMode) { soloState = startNextRound(soloState, { seed: Date.now() % 2147483647 }); renderSoloGame(); scheduleBotTurn(); return; }
+  if (soloMode) { soloState = startNextRound(soloState, { seed: Date.now() % 2147483647 }); soloTurnStartedAt = Date.now(); renderSoloGame(); scheduleBotTurn(); return; }
   const gref = roomRef(currentRoomCode, 'game');
   await runTransaction(gref, (game) => {
     if (!game || game.phase !== 'roundEnd') return game;
@@ -482,8 +570,10 @@ let soloState = null;
 let soloIds = [];
 let soloBotDifficulty = {};
 let botTimer = null;
+let soloTurnSeconds = 30;
+let soloTurnStartedAt = null;
 
-function startSolo({ botCount, difficulties, deckCount, layout }) {
+function startSolo({ botCount, difficulties, deckCount, layout, turnSeconds }) {
   soloIds = ['you', ...difficulties.map((_, i) => `bot${i + 1}`)];
   soloBotDifficulty = {};
   difficulties.forEach((d, i) => { soloBotDifficulty[`bot${i + 1}`] = d; });
@@ -492,20 +582,29 @@ function startSolo({ botCount, difficulties, deckCount, layout }) {
   soloMode = { botCount, difficulties };
   currentRoomCode = null;
   suppressTurnSound = true;
-  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null;
+  lastSeenRound = null; lastSeenBurnTopId = null; lastSeenHoldingId = null; lastAnnouncedPid = null;
+  roundEndKey = null; roundEndRevealAt = null; clearTimeout(roundEndTimer);
+  soloTurnSeconds = turnSeconds || 30;
+  soloTurnStartedAt = Date.now();
   soloState = newGame({ playerIds: soloIds, deckCount, layout, seed: Date.now() % 2147483647 });
   soloPlayPhaseMoves = 0;
   showScreen('screen-game');
   renderSoloGame();
   scheduleBotTurn();
+  clearInterval(turnTimerInterval);
+  turnTimerInterval = setInterval(tickTurnTimer, 1000);
 }
 
 let soloPlayPhaseMoves = 0;
 function applySoloMove(move) {
   try {
     const before = soloState.phase;
-    soloState = applyMove(soloState, 'you', move);
+    const beforePid = currentPlayer(soloState);
+    soloState = applyMove(soloState, beforePid, move);
     if (soloState.phase === 'play' && before === 'play') soloPlayPhaseMoves++; else soloPlayPhaseMoves = 0;
+    if (currentPlayer(soloState) !== beforePid || soloState.phase === 'roundEnd' || soloState.phase === 'gameOver') {
+      soloTurnStartedAt = Date.now();
+    }
   } catch (err) { toast(err.message); return; }
   renderSoloGame();
   scheduleBotTurn();
@@ -524,6 +623,9 @@ function scheduleBotTurn() {
     try { soloState = applyMove(soloState, pid, move); }
     catch { /* shouldn't happen; skip */ }
     if (soloState.phase === 'play' && before === 'play') soloPlayPhaseMoves++; else soloPlayPhaseMoves = 0;
+    if (currentPlayer(soloState) !== pid || soloState.phase === 'roundEnd' || soloState.phase === 'gameOver') {
+      soloTurnStartedAt = Date.now();
+    }
     renderSoloGame();
     scheduleBotTurn();
   }, 2000 + Math.random() * 500);
@@ -537,7 +639,7 @@ function renderSoloGame() {
 
 function saveSoloState() {
   try {
-    localStorage.setItem('kings_solo_save', JSON.stringify({ soloState, soloIds, soloBotDifficulty, cardBack: selectedCardBack }));
+    localStorage.setItem('kings_solo_save', JSON.stringify({ soloState, soloIds, soloBotDifficulty, cardBack: selectedCardBack, turnSeconds: soloTurnSeconds }));
   } catch { /* storage unavailable */ }
 }
 function clearSoloSave() {
@@ -555,9 +657,13 @@ function resumeSoloSave() {
     myName = 'You';
     soloMode = { botCount: soloIds.length - 1, difficulties: Object.values(soloBotDifficulty) };
     soloPlayPhaseMoves = 0;
+    soloTurnSeconds = saved.turnSeconds || 30;
+    soloTurnStartedAt = Date.now();
     showScreen('screen-game');
     renderSoloGame();
     scheduleBotTurn();
+    clearInterval(turnTimerInterval);
+    turnTimerInterval = setInterval(tickTurnTimer, 1000);
     return true;
   } catch { return false; }
 }
@@ -590,15 +696,23 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
 
   if (suppressTurnSound) { suppressTurnSound = false; wasMyTurn = isMyTurn; }
   else { if (isMyTurn && !wasMyTurn) playSound(sndTurn); wasMyTurn = isMyTurn; }
-  maybeCelebrateKing(game, myId, curPid);
+  maybeCelebrateKing(game, myId, curPid, names);
 
   // player rail — every player's name + running score, active player's pill pulses
   const isActivePhase = game.phase !== 'roundEnd' && game.phase !== 'gameOver';
+  if (isActivePhase && curPid !== lastAnnouncedPid) {
+    lastAnnouncedPid = curPid;
+    // Bots don't get shouted about — a solo table of one human doesn't need to be
+    // told the bot it's already watching just took its turn.
+    if (!(soloMode && curPid !== myId)) {
+      shoutout(curPid === myId ? 'Your turn' : `${names[curPid]?.name || '?'}'s turn`, 'var(--gold)');
+    }
+  }
   $('player-rail').innerHTML = order.map((pid) => {
     const p = game.players[pid];
     if (!p) return '';
     const vs = visibleScore(p.cells, game.layout);
-    const scoreLabel = `${vs.total}${vs.hiddenCount ? `+${vs.hiddenCount}?` : ''}`;
+    const scoreLabel = String(vs.total);
     const isTurn = isActivePhase && pid === curPid;
     const label = pid === myId ? 'You' : (names[pid]?.name || '?');
     return `<div class="rail-pill${p.out ? ' is-out' : ''}${isTurn ? ' active-turn' : ''}">
@@ -659,7 +773,7 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
 
   // my grid
   const myVs = visibleScore(me.cells, game.layout);
-  const myScoreLabel = `${myVs.total}${myVs.hiddenCount ? ` +${myVs.hiddenCount}?` : ''} pts`;
+  const myScoreLabel = `${myVs.total} pts`;
   const myBase = names[myId]?.name || 'You';
   $('my-name').textContent = me?.out ? `${myBase} (out) — ${myScoreLabel}` : `${myBase} — ${myScoreLabel}`;
   const myGrid = $('my-grid');
@@ -684,8 +798,23 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
 
   wireGameInteractions(game, myId, isMyTurn, cols);
 
-  // round end / game over overlays
-  if (game.phase === 'roundEnd') {
+  // round end / game over overlays — held back 3s after the round actually ends so
+  // everyone gets a moment to see the fully revealed table before it's covered up.
+  const endKey = (game.phase === 'roundEnd' || game.phase === 'gameOver') ? `${game.round}:${game.phase}` : null;
+  let showEndOverlay = false;
+  if (endKey) {
+    if (endKey !== roundEndKey) {
+      roundEndKey = endKey;
+      roundEndRevealAt = Date.now() + 3000;
+      clearTimeout(roundEndTimer);
+      roundEndTimer = setTimeout(() => { if (soloMode) renderSoloGame(); else renderGame(); }, 3000);
+    }
+    showEndOverlay = Date.now() >= roundEndRevealAt;
+  } else {
+    roundEndKey = null;
+  }
+
+  if (game.phase === 'roundEnd' && showEndOverlay) {
     show($('round-end-panel'));
     $('round-end-scores').innerHTML = order.filter((pid) => game.lastRoundScores[pid] !== undefined).map((pid) => {
       const score = game.lastRoundScores[pid];
@@ -702,7 +831,7 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
     $('round-end-wait').classList.toggle('hidden', !!iAmHostOrSolo);
   } else hide($('round-end-panel'));
 
-  if (game.phase === 'gameOver') {
+  if (game.phase === 'gameOver' && showEndOverlay) {
     show($('gameover-panel'));
     const survivor = order.find((pid) => !game.players[pid].out);
     $('gameover-title').textContent = survivor
@@ -770,13 +899,6 @@ $('round-end-next').addEventListener('click', () => requestNextRound());
 $('gameover-home').addEventListener('click', () => { leaveRoom(); showScreen('screen-home'); });
 
 // discard action: tapping the holding card discards it (only valid if not from burn)
-$('holding-slot').addEventListener('click', () => {
-  const game = soloMode ? soloState : latestRoom?.game;
-  if (!game?.holding) return;
-  if (game.holding.from === 'burn') { toast("You must swap in a card taken from the burn pile"); return; }
-  sendMove({ type: 'discard' });
-});
-
 // ================================================================== HOME / NAV
 $('btn-host').addEventListener('click', () => {
   showScreen('screen-join');
@@ -820,9 +942,15 @@ function pickSoloCardBack(id) {
   selectedCardBack = id; localStorage.setItem('kings_cardback', id);
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
 }
+function pickSoloTheme(id) {
+  selectedTheme = id; localStorage.setItem('kings_theme', id);
+  applyTheme(id);
+  renderThemePicker($('solo-theme-picker'), selectedTheme, true, pickSoloTheme);
+}
 $('btn-solo').addEventListener('click', () => {
   renderSoloBotOptions();
   renderCardBackPicker($('solo-cardback-picker'), selectedCardBack, true, pickSoloCardBack);
+  renderThemePicker($('solo-theme-picker'), selectedTheme, true, pickSoloTheme);
   showScreen('screen-solo-setup');
 });
 $('solo-bot-count').addEventListener('change', renderSoloBotOptions);
@@ -840,7 +968,8 @@ $('solo-start').addEventListener('click', () => {
     toast('Not enough cards for that many players — add a deck or use a smaller grid');
     return;
   }
-  startSolo({ botCount, difficulties, deckCount, layout });
+  const turnSeconds = parseInt($('solo-turn-seconds').value, 10);
+  startSolo({ botCount, difficulties, deckCount, layout, turnSeconds });
 });
 
 // ---------------------------------------------------------------- boot / resume

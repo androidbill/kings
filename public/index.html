@@ -14,6 +14,10 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<div id="shoutout" class="shoutout hidden" aria-hidden="true">
+  <div id="shoutout-card" class="shoutout-card"></div>
+</div>
+
 <div id="update-banner" class="update-banner hidden">
   <span>🆕 A new version is available</span>
   <button id="update-refresh">Refresh</button>
@@ -32,7 +36,7 @@
 <!-- HOME -->
 <section id="screen-home" class="screen">
   <div class="home-wrap">
-    <img class="home-crown" src="icons/icon-192.png" alt="">
+    <img class="home-king" src="kingart/C.jpg" alt="King of Clubs">
     <h1>Kings</h1>
     <p class="tagline">Flip. Swap. Burn. Lowest score wins.</p>
     <button id="btn-host" class="btn btn-primary">Host Online Game</button>
@@ -84,6 +88,8 @@
         </select>
       </label>
       <div id="lobby-cardback-picker" class="cardback-picker"></div>
+      <p class="picker-label">Color theme</p>
+      <div id="lobby-theme-picker" class="theme-picker"></div>
     </div>
 
     <button id="lobby-start" class="btn btn-primary">Start Game</button>
@@ -117,7 +123,15 @@
         <option value="rows5">2 rows of 5</option>
       </select>
     </label>
+    <label>Turn timer (for you — bots always move quickly)
+      <select id="solo-turn-seconds">
+        <option value="30">30 seconds</option>
+        <option value="45">45 seconds</option>
+      </select>
+    </label>
     <div id="solo-cardback-picker" class="cardback-picker"></div>
+    <p class="picker-label">Color theme</p>
+    <div id="solo-theme-picker" class="theme-picker"></div>
     <button id="solo-start" class="btn btn-primary">Start</button>
     <button class="btn btn-link back-btn" data-back="screen-home">Back</button>
   </div>
