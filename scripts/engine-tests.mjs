@@ -1,4 +1,4 @@
-import { newGame, applyMove, startNextRound, currentPlayer, playerScore, visibleScore } from '../public/rules.js';
+import { newGame, applyMove, startNextRound, currentPlayer, playerScore, visibleScore, layoutCols } from '../public/rules.js';
 
 function randInt(n) { return Math.floor(Math.random() * n); }
 
@@ -15,7 +15,7 @@ function playRandomGame(numPlayers, deckCount, layout, seed) {
     }
     const pid = currentPlayer(game);
     if (!game.revealed[pid]) {
-      const cols = game.layout === 'rows3' ? 3 : 4;
+      const cols = layoutCols(game.layout);
       game = applyMove(game, pid, { type: 'revealColumn', col: randInt(cols) });
       continue;
     }
@@ -43,12 +43,12 @@ function check(cond, msg) {
 
 for (const numPlayers of [2, 3, 5, 8]) {
   for (const deckCount of [1, 2]) {
-    for (const layout of ['rows3', 'rows4']) {
-      const size = layout === 'rows3' ? 6 : 8;
+    for (const layout of ['rows3', 'rows4', 'rows5']) {
+      const size = layoutCols(layout) * 2;
       const totalCards = deckCount * 52;
       if (numPlayers * size + 1 > totalCards) continue; // engine should throw; skip here
       for (let trial = 0; trial < 20; trial++) {
-        const seed = numPlayers * 1000 + deckCount * 100 + trial + (layout === 'rows4' ? 50 : 0);
+        const seed = numPlayers * 1000 + deckCount * 100 + trial + layoutCols(layout) * 50;
         const game = playRandomGame(numPlayers, deckCount, layout, seed);
         check(game.phase === 'gameOver', `game reached gameOver (${numPlayers}p ${deckCount}deck ${layout})`);
         const remaining = game.order.filter((pid) => !game.players[pid].out);

@@ -113,6 +113,14 @@ select {
   color: var(--text);
   font-size: 1em;
 }
+/* The dropdown's OPEN option list is rendered by the OS, not this stylesheet — most
+   platforms give it a plain white/light popup regardless of the select's own dark
+   background, so options need their own dark text explicitly or they render pale text
+   on a pale popup. */
+select option {
+  color: #1a1a1a;
+  background: #fff;
+}
 .muted { color: var(--muted); text-align: center; }
 
 .cardback-picker { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
@@ -178,6 +186,30 @@ select {
 
 /* ---------------------------------------------------------------- game screen */
 #screen-game { padding: 8px; position: relative; justify-content: flex-start; }
+
+.player-rail {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  width: 100%; max-width: 700px; padding: 4px 6px 8px;
+}
+.rail-pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.16);
+  font-size: 0.85em; font-weight: 600;
+}
+.rail-pill .rail-name { color: var(--text); }
+.rail-pill .rail-score { color: var(--gold); font-weight: 700; }
+.rail-pill.is-out { opacity: 0.45; }
+
+/* Shared "it's this one's turn" cue — a plain white pulse, used on the rail pill and
+   on whichever grid (mine or an opponent's) belongs to the acting player. */
+@keyframes pulse-white {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  50% { box-shadow: 0 0 0 4px rgba(255,255,255,0.85); }
+}
+.active-turn { animation: pulse-white 1.4s ease-in-out infinite; }
+
 .game-top {
   display: flex; justify-content: space-between; align-items: center;
   width: 100%; max-width: 520px; padding: 6px 10px;
@@ -209,14 +241,10 @@ select {
 .opponent {
   background: rgba(255,255,255,0.05); border-radius: 10px; padding: 6px 8px;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
-  border: 2px solid transparent;
 }
-.opponent.is-turn { border-color: var(--gold); }
 .opponent.is-out { opacity: 0.4; }
-.opponent-name { font-size: 0.8em; font-weight: 600; }
-.opponent-score { font-size: 0.75em; color: var(--gold); font-weight: 600; }
 .opponent-lives { font-size: 0.75em; color: var(--muted); }
-.opponent-grid { display: grid; gap: 2px; }
+.opponent-grid { display: grid; gap: 2px; border-radius: 4px; }
 .opponent .mini-card {
   width: 20px; height: 28px; border-radius: 3px; background: var(--card-back);
   background-size: cover; background-position: center;
@@ -263,7 +291,8 @@ select {
 }
 
 .my-grid {
-  display: grid; gap: 8px; justify-content: center; margin-top: 8px;
+  display: grid; gap: 8px; justify-content: center; margin-top: 8px; padding: 6px;
+  border-radius: 10px;
 }
 .my-grid .cell-wrap { display: flex; flex-direction: column; align-items: center; }
 .my-grid .card-back, .my-grid .card-face { width: 68px; height: 96px; }

@@ -4,7 +4,7 @@
 // table (every player's revealed cells + the burn pile) — the same "cards already
 // seen" a sharp human could track by eye. It never peeks at the draw pile or another
 // player's face-down cells.
-import { rankValue, RANKS, SUITS } from './rules.js';
+import { rankValue, RANKS, SUITS, layoutCols } from './rules.js';
 
 function fullDeckComposition(deckCount) {
   const counts = {};
@@ -39,7 +39,7 @@ function unseenAverage(game, pid, difficulty) {
 }
 
 export function botRevealMove(game, pid, difficulty) {
-  const cols = game.layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(game.layout);
   if (difficulty === 'hard') return { type: 'revealColumn', col: Math.floor(cols / 2) };
   return { type: 'revealColumn', col: Math.floor(Math.random() * cols) };
 }
@@ -50,7 +50,7 @@ export function botDrawMove(game, pid, difficulty) {
 
   const cells = game.players[pid].cells;
   const burnVal = rankValue(burnTop.rank);
-  const cols = game.layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(game.layout);
 
   // Always grab it if it completes a column match (instant zero).
   for (let c = 0; c < cols; c++) {
@@ -77,7 +77,7 @@ export function botActMove(game, pid, difficulty, forceProgress = false) {
   const held = game.holding.card;
   const heldVal = rankValue(held.rank);
   const cells = game.players[pid].cells;
-  const cols = game.layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(game.layout);
   const unseen = unseenAverage(game, pid, difficulty);
   const mustSwap = game.holding.from === 'burn';
 

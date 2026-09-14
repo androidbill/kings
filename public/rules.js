@@ -46,8 +46,14 @@ function shuffle(cards, seed) {
   return arr;
 }
 
+export function layoutCols(layout) {
+  if (layout === 'rows3') return 3;
+  if (layout === 'rows5') return 5;
+  return 4; // 'rows4' and any unrecognized value default to the original 2x4
+}
+
 export function gridSize(layout) {
-  return layout === 'rows3' ? 6 : 8; // rows3 = 2x3, rows4 = 2x4
+  return layoutCols(layout) * 2;
 }
 
 // ---------------------------------------------------------------- setup
@@ -112,7 +118,7 @@ export function currentPlayer(game) {
 }
 
 function columnIndices(layout, col) {
-  const cols = layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(layout);
   if (col < 0 || col >= cols) throw new Error('bad column');
   return [col, col + cols]; // top row 0..cols-1, bottom row cols..2*cols-1
 }
@@ -231,7 +237,7 @@ export function columnScore(cells, layout, col) {
 }
 
 export function playerScore(cells, layout) {
-  const cols = layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(layout);
   let total = 0;
   for (let c = 0; c < cols; c++) total += columnScore(cells, layout, c);
   return total;
@@ -241,7 +247,7 @@ export function playerScore(cells, layout) {
 // is simply not counted, same as a human watching would tally it. Used for the live
 // running score display; never leaks a hidden card's value.
 export function visibleScore(cells, layout) {
-  const cols = layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(layout);
   let total = 0;
   let hiddenCount = 0;
   for (let c = 0; c < cols; c++) {

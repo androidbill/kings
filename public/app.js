@@ -7,7 +7,7 @@ import { WORD_CODES } from './wordcodes.js';
 import { APP_VERSION } from './version.js';
 import { CARD_BACKS, cardBackById } from './cardbacks.js';
 import {
-  newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore,
+  newGame, applyMove, startNextRound, currentPlayer, gridSize, visibleScore, layoutCols,
 } from './rules.js';
 import { pickBotMove } from './bot.js';
 
@@ -241,7 +241,7 @@ let isHost = false;
 let turnTimerInterval = null;
 let autoPlayBusy = false; // prevents overlapping timeout-fallback transactions while one is in flight
 let soloMode = null; // { botCount, difficulties: [] } when playing solo
-let selectedCardBack = localStorage.getItem('kings_cardback') || 'classic';
+let selectedCardBack = localStorage.getItem('kings_cardback') || 'crown';
 
 function roomRef(code, ...path) { return ref(db, ['rooms', code, ...path].join('/')); }
 
@@ -579,7 +579,7 @@ function renderGame() {
 }
 
 function renderGameCommon(game, order, myId, names, cardBackId) {
-  const cols = game.layout === 'rows3' ? 3 : 4;
+  const cols = layoutCols(game.layout);
   const me = game.players[myId];
 
   $('game-round-info').textContent = `Round ${game.round}`;
@@ -592,22 +592,33 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   else { if (isMyTurn && !wasMyTurn) playSound(sndTurn); wasMyTurn = isMyTurn; }
   maybeCelebrateKing(game, myId, curPid);
 
+  // player rail — every player's name + running score, active player's pill pulses
+  const isActivePhase = game.phase !== 'roundEnd' && game.phase !== 'gameOver';
+  $('player-rail').innerHTML = order.map((pid) => {
+    const p = game.players[pid];
+    if (!p) return '';
+    const vs = visibleScore(p.cells, game.layout);
+    const scoreLabel = `${vs.total}${vs.hiddenCount ? `+${vs.hiddenCount}?` : ''}`;
+    const isTurn = isActivePhase && pid === curPid;
+    const label = pid === myId ? 'You' : (names[pid]?.name || '?');
+    return `<div class="rail-pill${p.out ? ' is-out' : ''}${isTurn ? ' active-turn' : ''}">
+      <span class="rail-name">${esc(label)}</span>
+      <span class="rail-score">${scoreLabel} pts</span>
+    </div>`;
+  }).join('');
+
   // opponents strip
   const others = order.filter((pid) => pid !== myId);
   $('opponents').innerHTML = others.map((pid) => {
     const p = game.players[pid];
     if (!p) return '';
-    const isTurn = pid === curPid ? ' is-turn' : '';
+    const isTurn = isActivePhase && pid === curPid;
     const outCls = p.out ? ' is-out' : '';
-    const gridCols = game.layout === 'rows3' ? 3 : 4;
+    const gridCols = layoutCols(game.layout);
     const cells = p.cells.map((c) => cardMiniHtml(c, cardBackId)).join('');
-    const vs = visibleScore(p.cells, game.layout);
-    const scoreLabel = `${vs.total}${vs.hiddenCount ? ` +${vs.hiddenCount}?` : ''}`;
-    return `<div class="opponent${isTurn}${outCls}">
-      <div class="opponent-name">${esc(names[pid]?.name || '?')}</div>
-      <div class="opponent-score">${scoreLabel} pts</div>
+    return `<div class="opponent${outCls}">
       <div class="opponent-lives">${'❤'.repeat(Math.max(0, p.lives))}</div>
-      <div class="opponent-grid" style="grid-template-columns:repeat(${gridCols},1fr)">${cells}</div>
+      <div class="opponent-grid${isTurn ? ' active-turn' : ''}" style="grid-template-columns:repeat(${gridCols},1fr)">${cells}</div>
     </div>`;
   }).join('');
 
@@ -653,6 +664,7 @@ function renderGameCommon(game, order, myId, names, cardBackId) {
   $('my-name').textContent = me?.out ? `${myBase} (out) — ${myScoreLabel}` : `${myBase} — ${myScoreLabel}`;
   const myGrid = $('my-grid');
   myGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  myGrid.classList.toggle('active-turn', isMyTurn);
   myGrid.innerHTML = me.cells.map((c, idx) => {
     const canRevealCol = isMyTurn && !game.revealed[myId];
     const canSwap = isMyTurn && game.holding;

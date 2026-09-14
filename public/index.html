@@ -74,6 +74,7 @@
         <select id="set-layout">
           <option value="rows3">2 rows of 3</option>
           <option value="rows4" selected>2 rows of 4</option>
+          <option value="rows5">2 rows of 5</option>
         </select>
       </label>
       <label>Turn timer
@@ -113,6 +114,7 @@
       <select id="solo-layout">
         <option value="rows3">2 rows of 3</option>
         <option value="rows4" selected>2 rows of 4</option>
+        <option value="rows5">2 rows of 5</option>
       </select>
     </label>
     <div id="solo-cardback-picker" class="cardback-picker"></div>
@@ -123,6 +125,8 @@
 
 <!-- GAME -->
 <section id="screen-game" class="screen hidden">
+  <div id="player-rail" class="player-rail"></div>
+
   <div class="game-top">
     <div id="game-round-info" class="game-round-info"></div>
     <div class="turn-badge">

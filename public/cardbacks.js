@@ -1,5 +1,4 @@
 export const CARD_BACKS = [
-  { id: 'classic', name: 'Classic', file: null },
   { id: 'crown', name: 'Royal Crown', file: 'cardbacks/crown.jpg' },
   { id: 'compass', name: 'Star Compass', file: 'cardbacks/compass.jpg' },
   { id: 'shell', name: 'Pearl Shell', file: 'cardbacks/shell.jpg' },
