@@ -440,7 +440,7 @@ function scheduleBotTurn() {
     if (soloState.phase === 'play' && before === 'play') soloPlayPhaseMoves++; else soloPlayPhaseMoves = 0;
     renderSoloGame();
     scheduleBotTurn();
-  }, 3000 + Math.random() * 500);
+  }, 2000 + Math.random() * 500);
 }
 
 function renderSoloGame() {
